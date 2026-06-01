@@ -1,4 +1,5 @@
 'use client'
+import Link from 'next/link'
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 
@@ -71,6 +72,13 @@ export default function LoginPage() {
           <div className="mt-5 p-3 bg-blue-50 border border-blue-100 rounded-lg">
             <p className="text-blue-700 text-xs font-medium mb-0.5">Demo данс:</p>
             <p className="text-slate-600 text-xs">batbold@clinic.mn / password</p>
+          </div>
+
+          <div className="mt-3 p-3 bg-emerald-50 border border-emerald-100 rounded-lg">
+            <p className="text-emerald-700 text-xs font-medium mb-1">Өвчтөнд зориулсан хэсэг</p>
+            <Link href="/patient-login" className="text-xs text-emerald-700 hover:underline">
+              Шинжилгээ, оношийн тайлбар авах
+            </Link>
           </div>
         </div>
 

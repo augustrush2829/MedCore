@@ -7,6 +7,7 @@ const navItems = [
   { href: '/dashboard', label: 'Хяналтын самбар', icon: '⊞' },
   { href: '/patients', label: 'Өвчтөнүүд', icon: '👤' },
   { href: '/cases', label: 'Тохиолдлууд', icon: '📋' },
+  { href: '/admin', label: 'Админ', icon: '⚙' },
   { href: '/audit', label: 'Audit Log', icon: '🔍' },
 ]
 

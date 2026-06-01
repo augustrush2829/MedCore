@@ -1,39 +1,105 @@
 'use client'
-import { use, useState } from 'react'
+
+import { use, useEffect, useState } from 'react'
+import type { ReactNode } from 'react'
 import AppShell from '@/components/layout/AppShell'
 import Link from 'next/link'
 import { mockCases } from '@/lib/mock-data'
+import type { ClinicalCase, LabResult, Medication, Symptom } from '@/types'
 
 const SECTIONS = ['Үндсэн мэдээлэл', 'Симптом', 'Амин үзүүлэлт', 'Лаборатори', 'Эм & Найрлага', 'Харшил']
+const INPUT_CLASS = 'w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20'
+
+type VitalSign = {
+  id: string
+  name: string
+  value: string
+  unit: string
+}
+
+type Allergy = {
+  id: string
+  substance: string
+  reaction: string
+  severity: 'mild' | 'moderate' | 'severe'
+}
+
+type EditableCase = ClinicalCase & {
+  clinicalNote: string
+  onsetDate: string
+  comorbidities: string
+  vitalSigns: VitalSign[]
+  allergies: Allergy[]
+}
+
+const DEFAULT_VITALS: VitalSign[] = [
+  { id: 'v1', name: 'Цусны даралт', value: '', unit: 'mmHg' },
+  { id: 'v2', name: 'Пульс', value: '', unit: 'bpm' },
+  { id: 'v3', name: 'Халуун', value: '', unit: '°C' },
+  { id: 'v4', name: 'SpO2', value: '', unit: '%' },
+  { id: 'v5', name: 'Амьсгалын тоо', value: '', unit: '/мин' },
+  { id: 'v6', name: 'Жин', value: '', unit: 'кг' },
+]
+
+function createEditableCase(caseData: ClinicalCase): EditableCase {
+  return {
+    ...caseData,
+    clinicalNote: '',
+    onsetDate: '',
+    comorbidities: '',
+    vitalSigns: DEFAULT_VITALS.map((vital) => ({ ...vital })),
+    allergies: [],
+  }
+}
+
+function nextId(prefix: string) {
+  return `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2)}`
+}
 
 export default function CasePage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params)
-  const caseData = mockCases.find((c) => c.id === id) ?? mockCases[0]
+  const initialCase = mockCases.find((c) => c.id === id) ?? mockCases[0]
+  const storageKey = `medcore.case.${id}`
+  const [caseData, setCaseData] = useState<EditableCase>(() => {
+    if (typeof window !== 'undefined') {
+      const saved = window.localStorage.getItem(storageKey)
+      if (saved) return JSON.parse(saved) as EditableCase
+    }
+    return createEditableCase(initialCase)
+  })
   const [activeSection, setActiveSection] = useState(0)
   const [analyzing, setAnalyzing] = useState(false)
 
+  useEffect(() => {
+    window.localStorage.setItem(storageKey, JSON.stringify(caseData))
+  }, [caseData, storageKey])
+
+  const updateCase = (patch: Partial<EditableCase>) => {
+    setCaseData((current) => ({ ...current, ...patch, updatedAt: new Date().toISOString() }))
+  }
+
   const handleAnalyze = () => {
     setAnalyzing(true)
+    window.localStorage.setItem(storageKey, JSON.stringify(caseData))
     setTimeout(() => {
       window.location.href = `/cases/${caseData.id}/ai-result`
-    }, 2000)
+    }, 900)
   }
 
   return (
     <AppShell>
       <div className="p-8 max-w-5xl">
-        {/* Breadcrumb */}
         <div className="flex items-center gap-2 text-sm text-slate-400 mb-6">
           <Link href="/dashboard" className="hover:text-slate-600">Хяналтын самбар</Link>
           <span>/</span>
           <span className="text-slate-700">{caseData.chiefComplaint}</span>
         </div>
 
-        {/* Header */}
         <div className="flex items-start justify-between mb-6">
           <div>
             <h1 className="text-xl font-bold text-slate-900">{caseData.patientName}</h1>
             <p className="text-slate-500 text-sm mt-0.5">{caseData.chiefComplaint}</p>
+            <p className="text-slate-400 text-xs mt-1">Сүүлд хадгалсан: {new Date(caseData.updatedAt).toLocaleString('mn-MN')}</p>
           </div>
           <button
             onClick={handleAnalyze}
@@ -53,37 +119,34 @@ export default function CasePage({ params }: { params: Promise<{ id: string }> }
         </div>
 
         <div className="flex gap-6">
-          {/* Section nav */}
           <div className="w-44 shrink-0">
             <div className="bg-white rounded-xl border border-slate-100 shadow-sm overflow-hidden">
-              {SECTIONS.map((s, i) => (
+              {SECTIONS.map((section, index) => (
                 <button
-                  key={s}
-                  onClick={() => setActiveSection(i)}
+                  key={section}
+                  onClick={() => setActiveSection(index)}
                   className={`w-full text-left px-4 py-3 text-sm border-b border-slate-50 last:border-0 transition ${
-                    activeSection === i
+                    activeSection === index
                       ? 'bg-blue-50 text-blue-700 font-medium'
                       : 'text-slate-600 hover:bg-slate-50'
                   }`}
                 >
-                  {s}
+                  {section}
                 </button>
               ))}
             </div>
           </div>
 
-          {/* Content */}
           <div className="flex-1">
             <div className="bg-white rounded-xl border border-slate-100 shadow-sm p-6">
-              {activeSection === 0 && <BasicInfoSection data={caseData} />}
-              {activeSection === 1 && <SymptomsSection data={caseData} />}
-              {activeSection === 2 && <VitalsSection />}
-              {activeSection === 3 && <LabSection data={caseData} />}
-              {activeSection === 4 && <MedSection data={caseData} />}
-              {activeSection === 5 && <AllergySection />}
+              {activeSection === 0 && <BasicInfoSection data={caseData} onChange={updateCase} />}
+              {activeSection === 1 && <SymptomsSection data={caseData} onChange={updateCase} />}
+              {activeSection === 2 && <VitalsSection data={caseData} onChange={updateCase} />}
+              {activeSection === 3 && <LabSection data={caseData} onChange={updateCase} />}
+              {activeSection === 4 && <MedSection data={caseData} onChange={updateCase} />}
+              {activeSection === 5 && <AllergySection data={caseData} onChange={updateCase} />}
             </div>
 
-            {/* Navigation buttons */}
             <div className="flex justify-between mt-4">
               <button
                 onClick={() => setActiveSection(Math.max(0, activeSection - 1))}
@@ -116,114 +179,170 @@ export default function CasePage({ params }: { params: Promise<{ id: string }> }
   )
 }
 
-function BasicInfoSection({ data }: { data: ReturnType<typeof mockCases[0]['chiefComplaint']['charAt']> | any }) {
+function BasicInfoSection({ data, onChange }: { data: EditableCase; onChange: (patch: Partial<EditableCase>) => void }) {
   return (
     <div className="space-y-4">
       <h3 className="font-semibold text-slate-900">Үндсэн мэдээлэл</h3>
       <div className="grid grid-cols-2 gap-4">
-        <div>
-          <label className="block text-xs font-medium text-slate-500 mb-1.5">Гол зовиур</label>
+        <Field label="Гол зовиур" className="col-span-1">
           <textarea
-            defaultValue={data.chiefComplaint}
+            value={data.chiefComplaint}
+            onChange={(event) => onChange({ chiefComplaint: event.target.value })}
             rows={3}
             className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 resize-none"
           />
-        </div>
-        <div>
-          <label className="block text-xs font-medium text-slate-500 mb-1.5">Эмчилгээний тэмдэглэл</label>
+        </Field>
+        <Field label="Эмчилгээний тэмдэглэл">
           <textarea
+            value={data.clinicalNote}
+            onChange={(event) => onChange({ clinicalNote: event.target.value })}
             placeholder="Нэмэлт тэмдэглэл..."
             rows={3}
             className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 resize-none"
           />
-        </div>
-        <div>
-          <label className="block text-xs font-medium text-slate-500 mb-1.5">Өвчний эхэлсэн огноо</label>
-          <input type="date" className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500" />
-        </div>
-        <div>
-          <label className="block text-xs font-medium text-slate-500 mb-1.5">Хавсарсан өвчин</label>
-          <input type="text" placeholder="ЧЭӨ, Чихрийн шижин..." className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500" />
-        </div>
+        </Field>
+        <Field label="Өвчний эхэлсэн огноо">
+          <input
+            type="date"
+            value={data.onsetDate}
+            onChange={(event) => onChange({ onsetDate: event.target.value })}
+            className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500"
+          />
+        </Field>
+        <Field label="Хавсарсан өвчин">
+          <input
+            type="text"
+            value={data.comorbidities}
+            onChange={(event) => onChange({ comorbidities: event.target.value })}
+            placeholder="ЧЭӨ, чихрийн шижин..."
+            className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500"
+          />
+        </Field>
       </div>
     </div>
   )
 }
 
-function SymptomsSection({ data }: { data: any }) {
+function SymptomsSection({ data, onChange }: { data: EditableCase; onChange: (patch: Partial<EditableCase>) => void }) {
+  const [draft, setDraft] = useState<Omit<Symptom, 'id'>>({
+    name: '',
+    severity: 'mild',
+    onsetDate: '',
+    duration: '',
+    note: '',
+  })
+
+  const addSymptom = () => {
+    if (!draft.name.trim()) return
+    onChange({ symptoms: [...data.symptoms, { ...draft, id: nextId('symptom') }] })
+    setDraft({ name: '', severity: 'mild', onsetDate: '', duration: '', note: '' })
+  }
+
+  const removeSymptom = (id: string) => {
+    onChange({ symptoms: data.symptoms.filter((symptom) => symptom.id !== id) })
+  }
+
   return (
     <div>
       <div className="flex items-center justify-between mb-4">
         <h3 className="font-semibold text-slate-900">Симптомууд</h3>
-        <button className="text-blue-600 text-sm hover:underline">+ Нэмэх</button>
+        <button onClick={addSymptom} className="text-blue-600 text-sm hover:underline">+ Нэмэх</button>
+      </div>
+      <div className="grid grid-cols-4 gap-3 mb-4">
+        <input value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} placeholder="Симптом" className={INPUT_CLASS} />
+        <select value={draft.severity} onChange={(event) => setDraft({ ...draft, severity: event.target.value as Symptom['severity'] })} className={INPUT_CLASS}>
+          <option value="mild">Хөнгөн</option>
+          <option value="moderate">Дунд</option>
+          <option value="severe">Хүнд</option>
+        </select>
+        <input type="date" value={draft.onsetDate} onChange={(event) => setDraft({ ...draft, onsetDate: event.target.value })} className={INPUT_CLASS} />
+        <input value={draft.duration} onChange={(event) => setDraft({ ...draft, duration: event.target.value })} placeholder="Үргэлжилсэн хугацаа" className={INPUT_CLASS} />
+        <input value={draft.note ?? ''} onChange={(event) => setDraft({ ...draft, note: event.target.value })} placeholder="Тэмдэглэл" className={`${INPUT_CLASS} col-span-4`} />
       </div>
       <div className="space-y-3">
-        {data.symptoms.map((s: any) => (
-          <div key={s.id} className="border border-slate-100 rounded-lg p-4 bg-slate-50">
+        {data.symptoms.map((symptom) => (
+          <ClinicalRow key={symptom.id} onRemove={() => removeSymptom(symptom.id)}>
             <div className="flex items-center justify-between mb-2">
-              <span className="font-medium text-slate-900 text-sm">{s.name}</span>
-              <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
-                s.severity === 'severe' ? 'bg-red-100 text-red-600'
-                : s.severity === 'moderate' ? 'bg-amber-100 text-amber-600'
-                : 'bg-green-100 text-green-600'
-              }`}>
-                {s.severity === 'severe' ? 'Хүнд' : s.severity === 'moderate' ? 'Дунд' : 'Хөнгөн'}
+              <span className="font-medium text-slate-900 text-sm">{symptom.name}</span>
+              <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${severityClass(symptom.severity)}`}>
+                {severityLabel(symptom.severity)}
               </span>
             </div>
             <div className="flex gap-4 text-xs text-slate-500">
-              <span>📅 {s.onsetDate}</span>
-              <span>⏱ {s.duration}</span>
-              {s.note && <span>📝 {s.note}</span>}
+              <span>📅 {symptom.onsetDate || 'Огноо байхгүй'}</span>
+              <span>⏱ {symptom.duration || 'Хугацаа байхгүй'}</span>
+              {symptom.note && <span>📝 {symptom.note}</span>}
             </div>
-          </div>
+          </ClinicalRow>
         ))}
-        {data.symptoms.length === 0 && (
-          <div className="text-center py-8 text-slate-400 text-sm border-2 border-dashed border-slate-200 rounded-lg">
-            Симптом нэмэгдээгүй байна
-          </div>
-        )}
+        {data.symptoms.length === 0 && <EmptyState label="Симптом нэмэгдээгүй байна" />}
       </div>
     </div>
   )
 }
 
-function VitalsSection() {
-  const vitals = [
-    { name: 'Цусны даралт', placeholder: '120/80', unit: 'mmHg' },
-    { name: 'Пульс', placeholder: '72', unit: 'bpm' },
-    { name: 'Халуун', placeholder: '36.6', unit: '°C' },
-    { name: 'SpO2', placeholder: '98', unit: '%' },
-    { name: 'Амьсгалын тоо', placeholder: '16', unit: '/мин' },
-    { name: 'Жин', placeholder: '65', unit: 'кг' },
-  ]
+function VitalsSection({ data, onChange }: { data: EditableCase; onChange: (patch: Partial<EditableCase>) => void }) {
+  const updateVital = (id: string, value: string) => {
+    onChange({ vitalSigns: data.vitalSigns.map((vital) => vital.id === id ? { ...vital, value } : vital) })
+  }
+
   return (
     <div>
       <h3 className="font-semibold text-slate-900 mb-4">Амин үзүүлэлт</h3>
       <div className="grid grid-cols-3 gap-4">
-        {vitals.map((v) => (
-          <div key={v.name}>
-            <label className="block text-xs font-medium text-slate-500 mb-1.5">{v.name}</label>
+        {data.vitalSigns.map((vital) => (
+          <Field key={vital.id} label={vital.name}>
             <div className="flex">
               <input
                 type="text"
-                placeholder={v.placeholder}
+                value={vital.value}
+                onChange={(event) => updateVital(vital.id, event.target.value)}
+                placeholder={vital.name === 'Цусны даралт' ? '120/80' : ''}
                 className="flex-1 border border-slate-200 rounded-l-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500"
               />
-              <span className="border border-l-0 border-slate-200 rounded-r-lg px-2.5 py-2 text-xs text-slate-400 bg-slate-50">{v.unit}</span>
+              <span className="border border-l-0 border-slate-200 rounded-r-lg px-2.5 py-2 text-xs text-slate-400 bg-slate-50">{vital.unit}</span>
             </div>
-          </div>
+          </Field>
         ))}
       </div>
     </div>
   )
 }
 
-function LabSection({ data }: { data: any }) {
+function LabSection({ data, onChange }: { data: EditableCase; onChange: (patch: Partial<EditableCase>) => void }) {
+  const [draft, setDraft] = useState<Omit<LabResult, 'id' | 'abnormalFlag'>>({
+    testName: '',
+    value: 0,
+    unit: '',
+    referenceRangeLow: 0,
+    referenceRangeHigh: 0,
+    collectedAt: new Date().toISOString().slice(0, 10),
+  })
+
+  const addLab = () => {
+    if (!draft.testName.trim() || !draft.unit.trim()) return
+    const abnormalFlag = draft.value < draft.referenceRangeLow || draft.value > draft.referenceRangeHigh
+    onChange({ labResults: [...data.labResults, { ...draft, id: nextId('lab'), abnormalFlag }] })
+    setDraft({ testName: '', value: 0, unit: '', referenceRangeLow: 0, referenceRangeHigh: 0, collectedAt: new Date().toISOString().slice(0, 10) })
+  }
+
+  const removeLab = (id: string) => {
+    onChange({ labResults: data.labResults.filter((lab) => lab.id !== id) })
+  }
+
   return (
     <div>
       <div className="flex items-center justify-between mb-4">
         <h3 className="font-semibold text-slate-900">Лабораторийн хариу</h3>
-        <button className="text-blue-600 text-sm hover:underline">+ Нэмэх</button>
+        <button onClick={addLab} className="text-blue-600 text-sm hover:underline">+ Нэмэх</button>
+      </div>
+      <div className="grid grid-cols-6 gap-3 mb-4">
+        <input value={draft.testName} onChange={(event) => setDraft({ ...draft, testName: event.target.value })} placeholder="ALT" className={INPUT_CLASS} />
+        <input type="number" value={draft.value} onChange={(event) => setDraft({ ...draft, value: Number(event.target.value) })} placeholder="Утга" className={INPUT_CLASS} />
+        <input value={draft.unit} onChange={(event) => setDraft({ ...draft, unit: event.target.value })} placeholder="U/L" className={INPUT_CLASS} />
+        <input type="number" value={draft.referenceRangeLow} onChange={(event) => setDraft({ ...draft, referenceRangeLow: Number(event.target.value) })} placeholder="Доод" className={INPUT_CLASS} />
+        <input type="number" value={draft.referenceRangeHigh} onChange={(event) => setDraft({ ...draft, referenceRangeHigh: Number(event.target.value) })} placeholder="Дээд" className={INPUT_CLASS} />
+        <input type="date" value={draft.collectedAt} onChange={(event) => setDraft({ ...draft, collectedAt: event.target.value })} className={INPUT_CLASS} />
       </div>
       {data.labResults.length > 0 ? (
         <div className="overflow-hidden rounded-lg border border-slate-100">
@@ -234,84 +353,192 @@ function LabSection({ data }: { data: any }) {
                 <th className="text-left px-4 py-2.5 text-xs font-medium text-slate-500">Үр дүн</th>
                 <th className="text-left px-4 py-2.5 text-xs font-medium text-slate-500">Хэвийн хязгаар</th>
                 <th className="text-left px-4 py-2.5 text-xs font-medium text-slate-500">Огноо</th>
+                <th className="px-4 py-2.5"></th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-50">
-              {data.labResults.map((l: any) => (
-                <tr key={l.id} className={l.abnormalFlag ? 'bg-red-50' : ''}>
-                  <td className="px-4 py-3 font-medium text-slate-900">{l.testName}</td>
+              {data.labResults.map((lab) => (
+                <tr key={lab.id} className={lab.abnormalFlag ? 'bg-red-50' : ''}>
+                  <td className="px-4 py-3 font-medium text-slate-900">{lab.testName}</td>
                   <td className="px-4 py-3">
-                    <span className={`font-semibold ${l.abnormalFlag ? 'text-red-600' : 'text-green-600'}`}>
-                      {l.value} {l.unit}
-                    </span>
-                    {l.abnormalFlag && <span className="ml-1 text-xs text-red-500">⚠</span>}
+                    <span className={`font-semibold ${lab.abnormalFlag ? 'text-red-600' : 'text-green-600'}`}>{lab.value} {lab.unit}</span>
+                    {lab.abnormalFlag && <span className="ml-1 text-xs text-red-500">⚠</span>}
                   </td>
-                  <td className="px-4 py-3 text-slate-500">{l.referenceRangeLow}–{l.referenceRangeHigh} {l.unit}</td>
-                  <td className="px-4 py-3 text-slate-400">{l.collectedAt}</td>
+                  <td className="px-4 py-3 text-slate-500">{lab.referenceRangeLow}–{lab.referenceRangeHigh} {lab.unit}</td>
+                  <td className="px-4 py-3 text-slate-400">{lab.collectedAt}</td>
+                  <td className="px-4 py-3 text-right">
+                    <button onClick={() => removeLab(lab.id)} className="text-xs text-red-500 hover:underline">Устгах</button>
+                  </td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
-      ) : (
-        <div className="text-center py-8 text-slate-400 text-sm border-2 border-dashed border-slate-200 rounded-lg">
-          Лабораторийн хариу нэмэгдээгүй
-        </div>
-      )}
+      ) : <EmptyState label="Лабораторийн хариу нэмэгдээгүй" />}
     </div>
   )
 }
 
-function MedSection({ data }: { data: any }) {
+function MedSection({ data, onChange }: { data: EditableCase; onChange: (patch: Partial<EditableCase>) => void }) {
+  const [draft, setDraft] = useState({
+    name: '',
+    dose: '',
+    route: 'амаар',
+    frequency: '',
+    startDate: new Date().toISOString().slice(0, 10),
+    ingredients: '',
+    status: 'active' as Medication['status'],
+  })
+
+  const addMedication = () => {
+    if (!draft.name.trim()) return
+    onChange({
+      medications: [
+        ...data.medications,
+        {
+          id: nextId('med'),
+          name: draft.name,
+          dose: draft.dose,
+          route: draft.route,
+          frequency: draft.frequency,
+          startDate: draft.startDate,
+          ingredients: draft.ingredients.split(',').map((item) => item.trim()).filter(Boolean),
+          status: draft.status,
+        },
+      ],
+    })
+    setDraft({ name: '', dose: '', route: 'амаар', frequency: '', startDate: new Date().toISOString().slice(0, 10), ingredients: '', status: 'active' })
+  }
+
+  const removeMedication = (id: string) => {
+    onChange({ medications: data.medications.filter((medication) => medication.id !== id) })
+  }
+
   return (
     <div>
       <div className="flex items-center justify-between mb-4">
         <h3 className="font-semibold text-slate-900">Эм & Найрлага</h3>
-        <button className="text-blue-600 text-sm hover:underline">+ Нэмэх</button>
+        <button onClick={addMedication} className="text-blue-600 text-sm hover:underline">+ Нэмэх</button>
+      </div>
+      <div className="grid grid-cols-6 gap-3 mb-4">
+        <input value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} placeholder="Эмийн нэр" className={INPUT_CLASS} />
+        <input value={draft.dose} onChange={(event) => setDraft({ ...draft, dose: event.target.value })} placeholder="Тун" className={INPUT_CLASS} />
+        <input value={draft.route} onChange={(event) => setDraft({ ...draft, route: event.target.value })} placeholder="Зам" className={INPUT_CLASS} />
+        <input value={draft.frequency} onChange={(event) => setDraft({ ...draft, frequency: event.target.value })} placeholder="Давтамж" className={INPUT_CLASS} />
+        <input type="date" value={draft.startDate} onChange={(event) => setDraft({ ...draft, startDate: event.target.value })} className={INPUT_CLASS} />
+        <select value={draft.status} onChange={(event) => setDraft({ ...draft, status: event.target.value as Medication['status'] })} className={INPUT_CLASS}>
+          <option value="active">Идэвхтэй</option>
+          <option value="stopped">Зогссон</option>
+        </select>
+        <input value={draft.ingredients} onChange={(event) => setDraft({ ...draft, ingredients: event.target.value })} placeholder="Найрлага, таслалаар" className={`${INPUT_CLASS} col-span-6`} />
       </div>
       <div className="space-y-3">
-        {data.medications.map((m: any) => (
-          <div key={m.id} className="border border-slate-100 rounded-lg p-4">
+        {data.medications.map((medication) => (
+          <ClinicalRow key={medication.id} onRemove={() => removeMedication(medication.id)}>
             <div className="flex items-center justify-between">
-              <span className="font-medium text-slate-900 text-sm">{m.name}</span>
-              <span className={`text-xs px-2 py-0.5 rounded-full ${m.status === 'active' ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-500'}`}>
-                {m.status === 'active' ? 'Идэвхтэй' : 'Зогссон'}
+              <span className="font-medium text-slate-900 text-sm">{medication.name}</span>
+              <span className={`text-xs px-2 py-0.5 rounded-full ${medication.status === 'active' ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-500'}`}>
+                {medication.status === 'active' ? 'Идэвхтэй' : 'Зогссон'}
               </span>
             </div>
             <div className="flex flex-wrap gap-3 mt-2 text-xs text-slate-500">
-              <span>💊 {m.dose}</span>
-              <span>🔄 {m.frequency}</span>
-              <span>📅 {m.startDate}-с</span>
+              <span>💊 {medication.dose || 'Тун байхгүй'}</span>
+              <span>🔄 {medication.frequency || 'Давтамж байхгүй'}</span>
+              <span>📅 {medication.startDate || 'Огноо байхгүй'}-с</span>
             </div>
-            {m.ingredients.length > 0 && (
+            {medication.ingredients.length > 0 && (
               <div className="mt-2 flex flex-wrap gap-1">
-                {m.ingredients.map((ing: string) => (
-                  <span key={ing} className="text-xs bg-blue-50 text-blue-600 px-2 py-0.5 rounded">{ing}</span>
+                {medication.ingredients.map((ingredient) => (
+                  <span key={ingredient} className="text-xs bg-blue-50 text-blue-600 px-2 py-0.5 rounded">{ingredient}</span>
                 ))}
               </div>
             )}
-          </div>
+          </ClinicalRow>
         ))}
-        {data.medications.length === 0 && (
-          <div className="text-center py-8 text-slate-400 text-sm border-2 border-dashed border-slate-200 rounded-lg">
-            Эм нэмэгдээгүй байна
-          </div>
-        )}
+        {data.medications.length === 0 && <EmptyState label="Эм нэмэгдээгүй байна" />}
       </div>
     </div>
   )
 }
 
-function AllergySection() {
+function AllergySection({ data, onChange }: { data: EditableCase; onChange: (patch: Partial<EditableCase>) => void }) {
+  const [draft, setDraft] = useState<Omit<Allergy, 'id'>>({ substance: '', reaction: '', severity: 'mild' })
+
+  const addAllergy = () => {
+    if (!draft.substance.trim()) return
+    onChange({ allergies: [...data.allergies, { ...draft, id: nextId('allergy') }] })
+    setDraft({ substance: '', reaction: '', severity: 'mild' })
+  }
+
+  const removeAllergy = (id: string) => {
+    onChange({ allergies: data.allergies.filter((allergy) => allergy.id !== id) })
+  }
+
   return (
     <div>
       <div className="flex items-center justify-between mb-4">
         <h3 className="font-semibold text-slate-900">Харшил</h3>
-        <button className="text-blue-600 text-sm hover:underline">+ Нэмэх</button>
+        <button onClick={addAllergy} className="text-blue-600 text-sm hover:underline">+ Нэмэх</button>
       </div>
-      <div className="text-center py-8 text-slate-400 text-sm border-2 border-dashed border-slate-200 rounded-lg">
-        Бүртгэгдсэн харшил байхгүй
+      <div className="grid grid-cols-3 gap-3 mb-4">
+        <input value={draft.substance} onChange={(event) => setDraft({ ...draft, substance: event.target.value })} placeholder="Бодис / эм" className={INPUT_CLASS} />
+        <input value={draft.reaction} onChange={(event) => setDraft({ ...draft, reaction: event.target.value })} placeholder="Урвал" className={INPUT_CLASS} />
+        <select value={draft.severity} onChange={(event) => setDraft({ ...draft, severity: event.target.value as Allergy['severity'] })} className={INPUT_CLASS}>
+          <option value="mild">Хөнгөн</option>
+          <option value="moderate">Дунд</option>
+          <option value="severe">Хүнд</option>
+        </select>
+      </div>
+      <div className="space-y-3">
+        {data.allergies.map((allergy) => (
+          <ClinicalRow key={allergy.id} onRemove={() => removeAllergy(allergy.id)}>
+            <div className="flex items-center justify-between">
+              <span className="font-medium text-slate-900 text-sm">{allergy.substance}</span>
+              <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${severityClass(allergy.severity)}`}>{severityLabel(allergy.severity)}</span>
+            </div>
+            <p className="text-xs text-slate-500 mt-1">{allergy.reaction || 'Урвалын тэмдэглэл байхгүй'}</p>
+          </ClinicalRow>
+        ))}
+        {data.allergies.length === 0 && <EmptyState label="Бүртгэгдсэн харшил байхгүй" />}
       </div>
     </div>
   )
+}
+
+function Field({ label, className = '', children }: { label: string; className?: string; children: ReactNode }) {
+  return (
+    <div className={className}>
+      <label className="block text-xs font-medium text-slate-500 mb-1.5">{label}</label>
+      {children}
+    </div>
+  )
+}
+
+function ClinicalRow({ children, onRemove }: { children: ReactNode; onRemove: () => void }) {
+  return (
+    <div className="border border-slate-100 rounded-lg p-4 bg-slate-50">
+      {children}
+      <button onClick={onRemove} className="text-xs text-red-500 hover:underline mt-3">Устгах</button>
+    </div>
+  )
+}
+
+function EmptyState({ label }: { label: string }) {
+  return (
+    <div className="text-center py-8 text-slate-400 text-sm border-2 border-dashed border-slate-200 rounded-lg">
+      {label}
+    </div>
+  )
+}
+
+function severityLabel(severity: 'mild' | 'moderate' | 'severe') {
+  return severity === 'severe' ? 'Хүнд' : severity === 'moderate' ? 'Дунд' : 'Хөнгөн'
+}
+
+function severityClass(severity: 'mild' | 'moderate' | 'severe') {
+  return severity === 'severe'
+    ? 'bg-red-100 text-red-600'
+    : severity === 'moderate'
+      ? 'bg-amber-100 text-amber-600'
+      : 'bg-green-100 text-green-600'
 }

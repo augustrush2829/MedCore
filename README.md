@@ -1,36 +1,56 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# MedCore
 
-## Getting Started
+MedCore is an AI-assisted clinical decision support MVP for doctors. The current repo contains:
 
-First, run the development server:
+- Next.js frontend under `src/`
+- FastAPI backend under `backend/`
+- PostgreSQL dev service in `docker-compose.yml`
+
+The backend follows `MedCore_Architecture_Report.docx`: RBAC, tenant-scoped patient/case data, structured clinical input, AI response orchestration, doctor confirmation, feedback capture, and append-only audit logs.
+
+## Frontend
 
 ```bash
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Frontend dev server: `http://localhost:3000`
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Backend
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+```bash
+cd backend
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+cp .env.example .env
+python -m app.seed
+uvicorn app.main:app --reload --port 8000
+```
 
-## Learn More
+Backend docs: `http://localhost:8000/docs`
 
-To learn more about Next.js, take a look at the following resources:
+Demo login:
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+```text
+batbold@clinic.mn / password
+```
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## PostgreSQL
 
-## Deploy on Vercel
+```bash
+docker compose up -d postgres
+```
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+Default `.env.example` points to PostgreSQL. Without `.env`, the backend uses local SQLite for quick development.
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+  organizations:
+  Улаанбаатар Эмнэлэг №1 mvp active
+  MedCore Platform platform active
+
+  users:
+  batbold@clinic.mn doctor
+  auditor@clinic.mn auditor
+  admin@clinic.mn admin
+  super@medcore.mn super_admin

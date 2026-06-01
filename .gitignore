@@ -2,6 +2,7 @@
 
 # dependencies
 /node_modules
+/backend/.venv
 /.pnp
 .pnp.*
 .yarn/*
@@ -23,6 +24,12 @@
 # misc
 .DS_Store
 *.pem
+__pycache__/
+*.py[cod]
+backend/*.db
+/medcore_dev.db
+/storage/
+/backend/storage/
 
 # debug
 npm-debug.log*
