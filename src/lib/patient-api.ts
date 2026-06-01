@@ -82,7 +82,9 @@ export type PatientExplanationPayload = {
 export const PATIENT_TOKEN_KEY = 'medcore.patientPortal.token'
 export const PATIENT_PROFILE_KEY = 'medcore.patientPortal.profile'
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://localhost:8000'
+// Default: ижил Next.js серверийн дотоод API route-ууд (/api/patient-portal/...).
+// Тусдаа backend ашиглах бол NEXT_PUBLIC_API_BASE_URL-ийг тохируулна.
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? '/api'
 
 export async function patientLogin(login_identifier: string, password: string) {
   const response = await fetch(`${API_BASE_URL}/patient-portal/login`, {

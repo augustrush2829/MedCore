@@ -86,14 +86,45 @@ export default function PatientPortalPage() {
       setError('Зөвхөн зураг файл оруулна уу')
       return
     }
+    setError('')
     const reader = new FileReader()
     reader.onload = () => {
-      setForm((current) => ({
-        ...current,
-        attachment_name: file.name,
-        attachment_content_type: file.type,
-        attachment_data_url: String(reader.result),
-      }))
+      const dataUrl = String(reader.result)
+      // Том зургийг (утасны фото) max 1600px болгож жижигрүүлэх — upload/AI хурд нэмэгдэнэ
+      const image = new window.Image()
+      image.onload = () => {
+        const MAX = 1600
+        const scale = Math.min(1, MAX / Math.max(image.width, image.height))
+        const w = Math.round(image.width * scale)
+        const h = Math.round(image.height * scale)
+        const canvas = document.createElement('canvas')
+        canvas.width = w
+        canvas.height = h
+        const ctx = canvas.getContext('2d')
+        let finalUrl = dataUrl
+        let contentType = file.type
+        if (ctx) {
+          ctx.drawImage(image, 0, 0, w, h)
+          finalUrl = canvas.toDataURL('image/jpeg', 0.85)
+          contentType = 'image/jpeg'
+        }
+        setForm((current) => ({
+          ...current,
+          attachment_name: file.name,
+          attachment_content_type: contentType,
+          attachment_data_url: finalUrl,
+        }))
+      }
+      image.onerror = () => {
+        // жижигрүүлж чадахгүй бол анхны зургийг ашиглана
+        setForm((current) => ({
+          ...current,
+          attachment_name: file.name,
+          attachment_content_type: file.type,
+          attachment_data_url: dataUrl,
+        }))
+      }
+      image.src = dataUrl
     }
     reader.readAsDataURL(file)
   }
