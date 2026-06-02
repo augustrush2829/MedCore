@@ -1,9 +1,9 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import or_, select
 
-from app.db.models import Allergy, ClinicalCase, Patient, PatientVerifiedFact, User
+from app.db.models import Allergy, ClinicalCase, Encounter, LabResult, Patient, PatientVerifiedFact, User
 from app.dependencies import DbSession, require_permission
-from app.schemas import AllergyCreate, AllergyRead, PatientCreate, PatientRead, PatientVerifiedFactCreate, PatientVerifiedFactRead
+from app.schemas import AllergyCreate, AllergyRead, PatientCreate, PatientLabBatchCreate, PatientRead, PatientVerifiedFactCreate, PatientVerifiedFactRead
 from app.services.audit import write_audit
 
 router = APIRouter(prefix="/patients", tags=["patients"])
@@ -84,6 +84,103 @@ def add_allergy(
     db.commit()
     db.refresh(allergy)
     return allergy
+
+
+@router.get("/{patient_id}/labs")
+def list_patient_labs(
+    patient_id: str,
+    db: DbSession,
+    user: User = Depends(require_permission("patient:read")),
+) -> list[dict]:
+    patient = db.get(Patient, patient_id)
+    if not patient or patient.organization_id != user.organization_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Patient not found")
+    cases = db.scalars(
+        select(ClinicalCase).where(
+            ClinicalCase.organization_id == user.organization_id,
+            ClinicalCase.patient_id == patient.id,
+        )
+    ).all()
+    case_by_id = {case.id: case for case in cases}
+    labs = db.scalars(select(LabResult).where(LabResult.case_id.in_(case_by_id.keys()))).all() if case_by_id else []
+    return [
+        {
+            "id": lab.id,
+            "patientId": patient.id,
+            "caseId": lab.case_id,
+            "testName": lab.test_name,
+            "value": lab.value,
+            "unit": lab.unit,
+            "referenceRangeLow": lab.reference_low,
+            "referenceRangeHigh": lab.reference_high,
+            "abnormalFlag": lab.abnormal_flag,
+            "collectedAt": lab.collected_at.isoformat(),
+            "source": "manual",
+            "createdAt": case_by_id[lab.case_id].created_at.isoformat(),
+        }
+        for lab in labs
+    ]
+
+
+@router.post("/{patient_id}/labs", status_code=status.HTTP_201_CREATED)
+def create_patient_labs(
+    patient_id: str,
+    payload: PatientLabBatchCreate,
+    db: DbSession,
+    user: User = Depends(require_permission("case:update")),
+) -> dict:
+    patient = db.get(Patient, patient_id)
+    if not patient or patient.organization_id != user.organization_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Patient not found")
+    if payload.case_id:
+        case = db.get(ClinicalCase, payload.case_id)
+        if not case or case.organization_id != user.organization_id or case.patient_id != patient.id:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Case not found")
+    else:
+        encounter = Encounter(organization_id=user.organization_id, patient_id=patient.id, doctor_id=user.id)
+        db.add(encounter)
+        db.flush()
+        case = ClinicalCase(
+            organization_id=user.organization_id,
+            encounter_id=encounter.id,
+            patient_id=patient.id,
+            created_by=user.id,
+            chief_complaint=payload.chief_complaint,
+        )
+        db.add(case)
+        db.flush()
+    created = [LabResult(case_id=case.id, **lab.model_dump()) for lab in payload.labs]
+    db.add_all(created)
+    write_audit(
+        db,
+        user=user,
+        action="patient.lab.batch_create",
+        entity_type="patient",
+        entity_id=patient.id,
+        after={"case_id": case.id, "lab_count": len(created)},
+    )
+    db.commit()
+    return {
+        "added": len(created),
+        "caseId": case.id,
+        "labs": [
+            {
+                "id": lab.id,
+                "patientId": patient.id,
+                "caseId": case.id,
+                "testName": lab.test_name,
+                "value": lab.value,
+                "unit": lab.unit,
+                "referenceRangeLow": lab.reference_low,
+                "referenceRangeHigh": lab.reference_high,
+                "abnormalFlag": lab.abnormal_flag,
+                "collectedAt": lab.collected_at.isoformat(),
+                "source": "manual",
+                "createdAt": case.created_at.isoformat(),
+            }
+            for lab in created
+        ],
+    }
 
 
 @router.get("/{patient_id}/verified-facts", response_model=list[PatientVerifiedFactRead])

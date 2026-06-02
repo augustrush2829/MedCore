@@ -53,4 +53,7 @@ Default `.env.example` points to PostgreSQL. Without `.env`, the backend uses lo
   batbold@clinic.mn doctor
   auditor@clinic.mn auditor
   admin@clinic.mn admin
-  super@medcore.mn super_admin
+  super@medcore.mn super_admin   change-me-local
+   Нэвтрэх нэр: MR-PATIENT-TEST
+  Нууц үг: Patient@12345
+

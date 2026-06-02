@@ -5,14 +5,33 @@ import { useRouter } from 'next/navigation'
 
 export default function LoginPage() {
   const router = useRouter()
-  const [email, setEmail] = useState('batbold@clinic.mn')
-  const [password, setPassword] = useState('password')
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
   const [loading, setLoading] = useState(false)
+  const [error, setError] = useState('')
 
-  const handleLogin = (e: React.FormEvent) => {
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault()
     setLoading(true)
-    setTimeout(() => router.push('/dashboard'), 800)
+    setError('')
+    try {
+      const response = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password }),
+      })
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({})) as { error?: string }
+        throw new Error(body.error || 'Нэвтрэхэд алдаа гарлаа')
+      }
+      const next = new URLSearchParams(window.location.search).get('next')
+      router.push(next || '/dashboard')
+      router.refresh()
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Нэвтрэхэд алдаа гарлаа')
+    } finally {
+      setLoading(false)
+    }
   }
 
   return (
@@ -31,6 +50,11 @@ export default function LoginPage() {
           <p className="text-slate-500 text-sm mb-6">Байгууллагын бүртгэлээр нэвтэрнэ үү</p>
 
           <form onSubmit={handleLogin} className="space-y-4">
+            {error && (
+              <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+                {error}
+              </div>
+            )}
             <div>
               <label className="block text-slate-700 text-xs font-medium mb-1.5">И-мэйл хаяг</label>
               <input
@@ -68,11 +92,6 @@ export default function LoginPage() {
               ) : 'Нэвтрэх'}
             </button>
           </form>
-
-          <div className="mt-5 p-3 bg-blue-50 border border-blue-100 rounded-lg">
-            <p className="text-blue-700 text-xs font-medium mb-0.5">Demo данс:</p>
-            <p className="text-slate-600 text-xs">batbold@clinic.mn / password</p>
-          </div>
 
           <div className="mt-3 p-3 bg-emerald-50 border border-emerald-100 rounded-lg">
             <p className="text-emerald-700 text-xs font-medium mb-1">Өвчтөнд зориулсан хэсэг</p>

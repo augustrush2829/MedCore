@@ -4,8 +4,8 @@ import { use, useEffect, useState } from 'react'
 import type { ReactNode } from 'react'
 import AppShell from '@/components/layout/AppShell'
 import Link from 'next/link'
-import { mockCases } from '@/lib/mock-data'
-import type { ClinicalCase, LabResult, Medication, Symptom } from '@/types'
+import { clinicalApi } from '@/lib/clinical-api'
+import type { CaseAttachment, CaseAttachmentSection, ClinicalCase, LabResult, Medication, Symptom } from '@/types'
 
 const SECTIONS = ['Үндсэн мэдээлэл', 'Симптом', 'Амин үзүүлэлт', 'Лаборатори', 'Эм & Найрлага', 'Харшил']
 const INPUT_CLASS = 'w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20'
@@ -42,13 +42,15 @@ const DEFAULT_VITALS: VitalSign[] = [
 ]
 
 function createEditableCase(caseData: ClinicalCase): EditableCase {
+  const saved = caseData as Partial<EditableCase>
   return {
     ...caseData,
-    clinicalNote: '',
-    onsetDate: '',
-    comorbidities: '',
-    vitalSigns: DEFAULT_VITALS.map((vital) => ({ ...vital })),
-    allergies: [],
+    attachments: caseData.attachments ?? [],
+    clinicalNote: saved.clinicalNote ?? '',
+    onsetDate: saved.onsetDate ?? '',
+    comorbidities: saved.comorbidities ?? '',
+    vitalSigns: saved.vitalSigns ?? DEFAULT_VITALS.map((vital) => ({ ...vital })),
+    allergies: saved.allergies ?? [],
   }
 }
 
@@ -58,33 +60,72 @@ function nextId(prefix: string) {
 
 export default function CasePage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params)
-  const initialCase = mockCases.find((c) => c.id === id) ?? mockCases[0]
-  const storageKey = `medcore.case.${id}`
-  const [caseData, setCaseData] = useState<EditableCase>(() => {
-    if (typeof window !== 'undefined') {
-      const saved = window.localStorage.getItem(storageKey)
-      if (saved) return JSON.parse(saved) as EditableCase
-    }
-    return createEditableCase(initialCase)
-  })
+  const [caseData, setCaseData] = useState<EditableCase | null>(null)
   const [activeSection, setActiveSection] = useState(0)
+  const [saving, setSaving] = useState(false)
+  const [deleting, setDeleting] = useState(false)
   const [analyzing, setAnalyzing] = useState(false)
+  const [error, setError] = useState('')
+  const [notice, setNotice] = useState('')
 
   useEffect(() => {
-    window.localStorage.setItem(storageKey, JSON.stringify(caseData))
-  }, [caseData, storageKey])
+    clinicalApi.case(id)
+      .then((result) => setCaseData(createEditableCase(result)))
+      .catch((caught) => setError(caught instanceof Error ? caught.message : 'Case API алдаа гарлаа'))
+  }, [id])
 
   const updateCase = (patch: Partial<EditableCase>) => {
-    setCaseData((current) => ({ ...current, ...patch, updatedAt: new Date().toISOString() }))
+    setNotice('')
+    setCaseData((current) => current ? { ...current, ...patch, updatedAt: new Date().toISOString() } : current)
   }
 
-  const handleAnalyze = () => {
-    setAnalyzing(true)
-    window.localStorage.setItem(storageKey, JSON.stringify(caseData))
-    setTimeout(() => {
-      window.location.href = `/cases/${caseData.id}/ai-result`
-    }, 900)
+  const handleSave = async () => {
+    if (!caseData) return
+    setSaving(true)
+    setError('')
+    setNotice('')
+    try {
+      const saved = await clinicalApi.updateCase(caseData.id, caseData)
+      setCaseData(createEditableCase(saved))
+      setNotice('Хадгаллаа')
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Case API хадгалах алдаа гарлаа')
+    } finally {
+      setSaving(false)
+    }
   }
+
+  const handleAnalyze = async () => {
+    if (!caseData) return
+    setAnalyzing(true)
+    setError('')
+    try {
+      await clinicalApi.updateCase(caseData.id, caseData)
+      await clinicalApi.analyzeCase(caseData.id)
+      window.location.href = `/cases/${caseData.id}/ai-result`
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Case API алдаа гарлаа')
+      setAnalyzing(false)
+    }
+  }
+
+  const handleDelete = async () => {
+    if (!caseData) return
+    const confirmed = window.confirm('Энэ тохиолдлыг бүр мөсөн устгах уу?')
+    if (!confirmed) return
+    setDeleting(true)
+    setError('')
+    try {
+      await clinicalApi.deleteCase(caseData.id)
+      window.location.href = '/cases'
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Case API устгах алдаа гарлаа')
+      setDeleting(false)
+    }
+  }
+
+  if (error) return <AppShell><div className="p-8 text-sm text-red-600">{error}</div></AppShell>
+  if (!caseData) return <AppShell><div className="p-8 text-sm text-slate-500">Case API-аас уншиж байна...</div></AppShell>
 
   return (
     <AppShell>
@@ -100,22 +141,39 @@ export default function CasePage({ params }: { params: Promise<{ id: string }> }
             <h1 className="text-xl font-bold text-slate-900">{caseData.patientName}</h1>
             <p className="text-slate-500 text-sm mt-0.5">{caseData.chiefComplaint}</p>
             <p className="text-slate-400 text-xs mt-1">Сүүлд хадгалсан: {new Date(caseData.updatedAt).toLocaleString('mn-MN')}</p>
+            {notice && <p className="text-green-600 text-xs mt-1">{notice}</p>}
           </div>
-          <button
-            onClick={handleAnalyze}
-            disabled={analyzing}
-            className="bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white px-5 py-2.5 rounded-lg text-sm font-medium transition flex items-center gap-2"
-          >
-            {analyzing ? (
-              <>
-                <svg className="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                </svg>
-                AI шинжилж байна...
-              </>
-            ) : '🧠 AI шинжилгээ хийх'}
-          </button>
+          <div className="flex items-center gap-3">
+            <button
+              onClick={handleDelete}
+              disabled={deleting || saving || analyzing}
+              className="border border-red-200 bg-white hover:bg-red-50 disabled:opacity-50 text-red-600 px-4 py-2.5 rounded-lg text-sm font-medium transition"
+            >
+              {deleting ? 'Устгаж байна...' : 'Тохиолдол устгах'}
+            </button>
+            <button
+              onClick={handleSave}
+              disabled={saving || analyzing || deleting}
+              className="border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-50 text-slate-700 px-4 py-2.5 rounded-lg text-sm font-medium transition"
+            >
+              {saving ? 'Хадгалж байна...' : 'Хадгалах'}
+            </button>
+            <button
+              onClick={handleAnalyze}
+              disabled={analyzing || saving || deleting}
+              className="bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white px-5 py-2.5 rounded-lg text-sm font-medium transition flex items-center gap-2"
+            >
+              {analyzing ? (
+                <>
+                  <svg className="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                  </svg>
+                  AI шинжилж байна...
+                </>
+              ) : '🧠 AI шинжилгээ хийх'}
+            </button>
+          </div>
         </div>
 
         <div className="flex gap-6">
@@ -219,6 +277,7 @@ function BasicInfoSection({ data, onChange }: { data: EditableCase; onChange: (p
           />
         </Field>
       </div>
+      <ImageAttachmentPanel data={data} onChange={onChange} section="basic" title="Үндсэн мэдээлэлтэй холбоотой зураг" />
     </div>
   )
 }
@@ -277,6 +336,7 @@ function SymptomsSection({ data, onChange }: { data: EditableCase; onChange: (pa
         ))}
         {data.symptoms.length === 0 && <EmptyState label="Симптом нэмэгдээгүй байна" />}
       </div>
+      <ImageAttachmentPanel data={data} onChange={onChange} section="symptoms" title="Симптомтой холбоотой зураг" />
     </div>
   )
 }
@@ -305,11 +365,14 @@ function VitalsSection({ data, onChange }: { data: EditableCase; onChange: (patc
           </Field>
         ))}
       </div>
+      <ImageAttachmentPanel data={data} onChange={onChange} section="vitals" title="Амин үзүүлэлтийн зураг" />
     </div>
   )
 }
 
 function LabSection({ data, onChange }: { data: EditableCase; onChange: (patch: Partial<EditableCase>) => void }) {
+  const [extracting, setExtracting] = useState(false)
+  const [extractMessage, setExtractMessage] = useState('')
   const [draft, setDraft] = useState<Omit<LabResult, 'id' | 'abnormalFlag'>>({
     testName: '',
     value: 0,
@@ -330,12 +393,40 @@ function LabSection({ data, onChange }: { data: EditableCase; onChange: (patch: 
     onChange({ labResults: data.labResults.filter((lab) => lab.id !== id) })
   }
 
+  const extractFromImages = async () => {
+    setExtracting(true)
+    setExtractMessage('')
+    try {
+      await clinicalApi.updateCase(data.id, data)
+      const result = await clinicalApi.extractLabs(data.id)
+      onChange({
+        labResults: result.case.labResults,
+        attachments: result.case.attachments ?? data.attachments,
+      })
+      setExtractMessage(result.added > 0 ? `${result.added} lab мөр зурагнаас нэмлээ. Patient labs-д ${result.patientLabsAdded} мөр хадгаллаа.` : 'Шинэ lab мөр нэмэгдсэнгүй.')
+    } catch (caught) {
+      setExtractMessage(caught instanceof Error ? caught.message : 'Зурагнаас lab уншихад алдаа гарлаа')
+    } finally {
+      setExtracting(false)
+    }
+  }
+
   return (
     <div>
       <div className="flex items-center justify-between mb-4">
         <h3 className="font-semibold text-slate-900">Лабораторийн хариу</h3>
-        <button onClick={addLab} className="text-blue-600 text-sm hover:underline">+ Нэмэх</button>
+        <div className="flex items-center gap-3">
+          <button onClick={extractFromImages} disabled={extracting} className="text-blue-600 disabled:text-slate-400 text-sm hover:underline">
+            {extracting ? 'Зураг уншиж байна...' : 'Зурагнаас lab унших'}
+          </button>
+          <button onClick={addLab} className="text-blue-600 text-sm hover:underline">+ Нэмэх</button>
+        </div>
       </div>
+      {extractMessage && (
+        <div className={`mb-3 rounded-lg border px-3 py-2 text-sm ${extractMessage.includes('алдаа') || extractMessage.includes('тохируулагдаагүй') ? 'border-red-200 bg-red-50 text-red-700' : 'border-blue-200 bg-blue-50 text-blue-700'}`}>
+          {extractMessage}
+        </div>
+      )}
       <div className="grid grid-cols-6 gap-3 mb-4">
         <input value={draft.testName} onChange={(event) => setDraft({ ...draft, testName: event.target.value })} placeholder="ALT" className={INPUT_CLASS} />
         <input type="number" value={draft.value} onChange={(event) => setDraft({ ...draft, value: Number(event.target.value) })} placeholder="Утга" className={INPUT_CLASS} />
@@ -365,7 +456,10 @@ function LabSection({ data, onChange }: { data: EditableCase; onChange: (patch: 
                     {lab.abnormalFlag && <span className="ml-1 text-xs text-red-500">⚠</span>}
                   </td>
                   <td className="px-4 py-3 text-slate-500">{lab.referenceRangeLow}–{lab.referenceRangeHigh} {lab.unit}</td>
-                  <td className="px-4 py-3 text-slate-400">{lab.collectedAt}</td>
+                  <td className="px-4 py-3 text-slate-400">
+                    {lab.collectedAt || 'Эмчээс огноо тодруулах'}
+                    {lab.dateReviewRequired && <span className="ml-1 text-xs text-amber-600">шаардлагатай</span>}
+                  </td>
                   <td className="px-4 py-3 text-right">
                     <button onClick={() => removeLab(lab.id)} className="text-xs text-red-500 hover:underline">Устгах</button>
                   </td>
@@ -375,6 +469,7 @@ function LabSection({ data, onChange }: { data: EditableCase; onChange: (patch: 
           </table>
         </div>
       ) : <EmptyState label="Лабораторийн хариу нэмэгдээгүй" />}
+      <ImageAttachmentPanel data={data} onChange={onChange} section="labs" title="Лабораторийн хариуны зураг" />
     </div>
   )
 }
@@ -457,6 +552,7 @@ function MedSection({ data, onChange }: { data: EditableCase; onChange: (patch: 
         ))}
         {data.medications.length === 0 && <EmptyState label="Эм нэмэгдээгүй байна" />}
       </div>
+      <ImageAttachmentPanel data={data} onChange={onChange} section="medications" title="Эм, найрлагатай холбоотой зураг" />
     </div>
   )
 }
@@ -501,8 +597,88 @@ function AllergySection({ data, onChange }: { data: EditableCase; onChange: (pat
         ))}
         {data.allergies.length === 0 && <EmptyState label="Бүртгэгдсэн харшил байхгүй" />}
       </div>
+      <ImageAttachmentPanel data={data} onChange={onChange} section="allergies" title="Харшилтай холбоотой зураг" />
     </div>
   )
+}
+
+function ImageAttachmentPanel({
+  data,
+  onChange,
+  section,
+  title,
+}: {
+  data: EditableCase
+  onChange: (patch: Partial<EditableCase>) => void
+  section: CaseAttachmentSection
+  title: string
+}) {
+  const attachments = (data.attachments ?? []).filter((attachment) => attachment.section === section)
+
+  const addFiles = async (files: FileList | null) => {
+    if (!files?.length) return
+    const images = Array.from(files).filter((file) => file.type.startsWith('image/'))
+    if (images.length === 0) return
+    const uploaded = await Promise.all(images.map(readImageAttachment(section)))
+    onChange({ attachments: [...(data.attachments ?? []), ...uploaded] })
+  }
+
+  const removeAttachment = (id: string) => {
+    onChange({ attachments: (data.attachments ?? []).filter((attachment) => attachment.id !== id) })
+  }
+
+  return (
+    <section className="mt-6 rounded-lg border border-slate-200 bg-slate-50 p-4">
+      <div className="flex items-center justify-between gap-3 mb-3">
+        <div>
+          <h4 className="text-sm font-semibold text-slate-900">{title}</h4>
+          <p className="text-xs text-slate-500">AI-д дараа ашиглах зураг, screenshot, lab/photo evidence энд хадгалагдана.</p>
+        </div>
+        <label className="cursor-pointer rounded-lg bg-white border border-slate-200 px-3 py-2 text-xs font-medium text-blue-600 hover:bg-blue-50">
+          Зураг нэмэх
+          <input type="file" accept="image/*" multiple className="hidden" onChange={(event) => addFiles(event.target.files)} />
+        </label>
+      </div>
+      {attachments.length > 0 ? (
+        <div className="grid grid-cols-3 gap-3">
+          {attachments.map((attachment) => (
+            <div key={attachment.id} className="overflow-hidden rounded-lg border border-slate-200 bg-white">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={attachment.dataUrl} alt={attachment.fileName} className="h-28 w-full object-cover bg-slate-100" />
+              <div className="p-2">
+                <p className="truncate text-xs font-medium text-slate-700">{attachment.fileName}</p>
+                <p className="text-[11px] text-slate-400">{Math.round(attachment.sizeBytes / 1024)} KB · {new Date(attachment.createdAt).toLocaleString('mn-MN')}</p>
+                <button onClick={() => removeAttachment(attachment.id)} className="mt-1 text-xs text-red-500 hover:underline">Устгах</button>
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="rounded-lg border-2 border-dashed border-slate-200 bg-white py-6 text-center text-sm text-slate-400">
+          Зураг нэмэгдээгүй байна
+        </div>
+      )}
+    </section>
+  )
+}
+
+function readImageAttachment(section: CaseAttachmentSection) {
+  return (file: File) => new Promise<CaseAttachment>((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => {
+      resolve({
+        id: nextId('attachment'),
+        section,
+        fileName: file.name,
+        contentType: file.type,
+        sizeBytes: file.size,
+        dataUrl: String(reader.result),
+        createdAt: new Date().toISOString(),
+      })
+    }
+    reader.onerror = () => reject(new Error('Зураг уншихад алдаа гарлаа'))
+    reader.readAsDataURL(file)
+  })
 }
 
 function Field({ label, className = '', children }: { label: string; className?: string; children: ReactNode }) {

@@ -175,7 +175,6 @@ export default function PatientPortalPage() {
             </p>
           </div>
           <div className="flex items-center gap-3">
-            <Link href="/" className="text-sm text-slate-500 hover:text-slate-800">Эмчийн хэсэг</Link>
             <button onClick={logout} className="text-sm text-red-600 hover:text-red-700">Гарах</button>
           </div>
         </div>

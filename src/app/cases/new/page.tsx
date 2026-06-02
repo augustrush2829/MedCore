@@ -3,16 +3,26 @@ import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import AppShell from '@/components/layout/AppShell'
 import Link from 'next/link'
-import { mockPatients } from '@/lib/mock-data'
+import { useEffect } from 'react'
+import type { Patient } from '@/types'
+import { clinicalApi } from '@/lib/clinical-api'
 
 export default function NewCasePage() {
   const router = useRouter()
+  const [patients, setPatients] = useState<Patient[]>([])
   const [search, setSearch] = useState('')
   const [selectedPatient, setSelectedPatient] = useState<string | null>(null)
   const [chiefComplaint, setChiefComplaint] = useState('')
   const [creating, setCreating] = useState(false)
+  const [error, setError] = useState('')
 
-  const filtered = mockPatients.filter(
+  useEffect(() => {
+    clinicalApi.patients()
+      .then(setPatients)
+      .catch((caught) => setError(caught instanceof Error ? caught.message : 'Patients API алдаа гарлаа'))
+  }, [])
+
+  const filtered = patients.filter(
     (p) =>
       p.name.toLowerCase().includes(search.toLowerCase()) ||
       p.medicalRecordNo.toLowerCase().includes(search.toLowerCase())
@@ -20,12 +30,18 @@ export default function NewCasePage() {
 
   const canCreate = selectedPatient && chiefComplaint.trim().length > 0
 
-  const handleCreate = (e: React.FormEvent) => {
+  const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!canCreate) return
     setCreating(true)
-    // Demo: route into the existing clinical input form
-    setTimeout(() => router.push('/cases/c1'), 900)
+    setError('')
+    try {
+      const created = await clinicalApi.createCase({ patientId: selectedPatient, chiefComplaint })
+      router.push(`/cases/${created.id}`)
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Case API алдаа гарлаа')
+      setCreating(false)
+    }
   }
 
   return (
@@ -38,6 +54,7 @@ export default function NewCasePage() {
         </div>
 
         <h1 className="text-2xl font-bold text-slate-900 mb-6">Шинэ тохиолдол үүсгэх</h1>
+        {error && <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>}
 
         <form onSubmit={handleCreate} className="space-y-6">
           {/* Step 1: Patient */}

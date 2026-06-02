@@ -20,6 +20,16 @@ class StoredImage:
 
 
 @dataclass(frozen=True)
+class StoredFile:
+    object_key: str
+    content_type: str
+    sha256: str
+    size_bytes: int
+    width: int | None = None
+    height: int | None = None
+
+
+@dataclass(frozen=True)
 class ImagePayload:
     content_type: str
     data: bytes
@@ -27,18 +37,38 @@ class ImagePayload:
 
 def store_patient_image(*, organization_id: str, patient_id: str, data_url: str) -> StoredImage:
     image = parse_image_data_url(data_url)
-    sha256 = hashlib.sha256(image.data).hexdigest()
-    width, height = detect_image_dimensions(image.content_type, image.data)
-    extension = extension_for_content_type(image.content_type)
+    stored = store_patient_file_payload(organization_id=organization_id, patient_id=patient_id, payload=image)
+    return StoredImage(
+        object_key=stored.object_key,
+        content_type=stored.content_type,
+        sha256=stored.sha256,
+        size_bytes=stored.size_bytes,
+        width=stored.width,
+        height=stored.height,
+    )
+
+
+def store_patient_file(*, organization_id: str, patient_id: str, data_url: str) -> StoredFile:
+    return store_patient_file_payload(
+        organization_id=organization_id,
+        patient_id=patient_id,
+        payload=parse_file_data_url(data_url),
+    )
+
+
+def store_patient_file_payload(*, organization_id: str, patient_id: str, payload: ImagePayload) -> StoredFile:
+    sha256 = hashlib.sha256(payload.data).hexdigest()
+    width, height = detect_image_dimensions(payload.content_type, payload.data)
+    extension = extension_for_content_type(payload.content_type)
     object_key = f"{organization_id}/{patient_id}/{uuid4()}{extension}"
     path = storage_root() / object_key
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_bytes(encrypt_bytes(image.data))
-    return StoredImage(
+    path.write_bytes(encrypt_bytes(payload.data))
+    return StoredFile(
         object_key=object_key,
-        content_type=image.content_type,
+        content_type=payload.content_type,
         sha256=sha256,
-        size_bytes=len(image.data),
+        size_bytes=len(payload.data),
         width=width,
         height=height,
     )
@@ -83,16 +113,25 @@ def safe_storage_path(object_key: str) -> Path:
 
 
 def parse_image_data_url(data_url: str) -> ImagePayload:
-    header, separator, encoded = data_url.partition(",")
-    if not separator or not header.startswith("data:image/") or ";base64" not in header:
+    payload = parse_file_data_url(data_url)
+    if not payload.content_type.startswith("image/"):
         raise ValueError("Зургийн data URL буруу байна.")
+    return payload
+
+
+def parse_file_data_url(data_url: str) -> ImagePayload:
+    header, separator, encoded = data_url.partition(",")
+    if not separator or not header.startswith("data:") or ";base64" not in header:
+        raise ValueError("Файлын data URL буруу байна.")
     content_type = header.removeprefix("data:").split(";", 1)[0]
+    if content_type not in {"image/png", "image/jpeg", "image/jpg", "image/webp", "application/pdf", "text/plain"}:
+        raise ValueError("Дэмжигдээгүй file content type байна.")
     try:
         data = base64.b64decode(encoded, validate=True)
     except ValueError as exc:
-        raise ValueError("Зургийн base64 payload уншигдсангүй.") from exc
-    if len(data) > 5 * 1024 * 1024:
-        raise ValueError("Зураг 5MB-аас их байна.")
+        raise ValueError("Файлын base64 payload уншигдсангүй.") from exc
+    if len(data) > 10 * 1024 * 1024:
+        raise ValueError("Файл 10MB-аас их байна.")
     return ImagePayload(content_type=content_type, data=data)
 
 
@@ -102,6 +141,8 @@ def extension_for_content_type(content_type: str) -> str:
         "image/jpeg": ".jpg",
         "image/jpg": ".jpg",
         "image/webp": ".webp",
+        "application/pdf": ".pdf",
+        "text/plain": ".txt",
     }.get(content_type, ".img")
 
 

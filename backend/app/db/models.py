@@ -8,8 +8,14 @@ from sqlalchemy.types import JSON
 
 from app.db.session import Base
 
+try:
+    from pgvector.sqlalchemy import Vector
+except ImportError:  # pragma: no cover - optional dependency in sqlite-only dev shells
+    Vector = None
+
 
 JsonType = JSON().with_variant(JSONB, "postgresql")
+EmbeddingType = Vector(3072).with_variant(JSON(), "sqlite") if Vector else JsonType
 
 
 def new_id() -> str:
@@ -165,6 +171,8 @@ class ClinicalCase(Base, TimestampMixin):
     medications: Mapped[list["Medication"]] = relationship(back_populates="case", cascade="all, delete-orphan")
     supplements: Mapped[list["Supplement"]] = relationship(back_populates="case", cascade="all, delete-orphan")
     ai_responses: Mapped[list["AIResponse"]] = relationship(back_populates="case")
+    attachments: Mapped[list["CaseAttachment"]] = relationship(back_populates="case", cascade="all, delete-orphan")
+    proposed_facts: Mapped[list["ProposedClinicalFact"]] = relationship(back_populates="case", cascade="all, delete-orphan")
 
 
 class Symptom(Base):
@@ -208,6 +216,110 @@ class LabResult(Base):
     collected_at: Mapped[date] = mapped_column(Date, nullable=False)
 
     case: Mapped[ClinicalCase] = relationship(back_populates="lab_results")
+
+
+class KnowledgeDocument(Base, TimestampMixin):
+    __tablename__ = "knowledge_documents"
+    __table_args__ = (
+        UniqueConstraint("source_hash", name="uq_knowledge_documents_source_hash"),
+        Index("ix_knowledge_documents_category", "category"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    title: Mapped[str] = mapped_column(String(255), nullable=False)
+    source_path: Mapped[str] = mapped_column(String(500), nullable=False)
+    source_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    content_type: Mapped[str] = mapped_column(String(100), nullable=False)
+    category: Mapped[str] = mapped_column(String(80), default="clinical", nullable=False)
+    version: Mapped[str] = mapped_column(String(80), default="local", nullable=False)
+    metadata_json: Mapped[dict] = mapped_column(JsonType, default=dict, nullable=False)
+
+    chunks: Mapped[list["KnowledgeChunk"]] = relationship(back_populates="document", cascade="all, delete-orphan")
+
+
+class KnowledgeChunk(Base, TimestampMixin):
+    __tablename__ = "knowledge_chunks"
+    __table_args__ = (
+        Index("ix_knowledge_chunks_document", "document_id"),
+        Index("ix_knowledge_chunks_category", "category"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    document_id: Mapped[str] = mapped_column(ForeignKey("knowledge_documents.id"), index=True, nullable=False)
+    chunk_index: Mapped[int] = mapped_column(Integer, nullable=False)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    embedding: Mapped[list[float] | None] = mapped_column(EmbeddingType)
+    embedding_model: Mapped[str | None] = mapped_column(String(100))
+    category: Mapped[str] = mapped_column(String(80), default="clinical", nullable=False)
+    source_title: Mapped[str] = mapped_column(String(255), nullable=False)
+    source_path: Mapped[str] = mapped_column(String(500), nullable=False)
+    metadata_json: Mapped[dict] = mapped_column(JsonType, default=dict, nullable=False)
+
+    document: Mapped[KnowledgeDocument] = relationship(back_populates="chunks")
+
+
+class CaseAttachment(Base, TimestampMixin):
+    __tablename__ = "case_attachments"
+    __table_args__ = (Index("ix_case_attachments_case_section", "case_id", "section"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    organization_id: Mapped[str] = mapped_column(ForeignKey("organizations.id"), index=True, nullable=False)
+    case_id: Mapped[str] = mapped_column(ForeignKey("clinical_cases.id"), index=True, nullable=False)
+    patient_id: Mapped[str] = mapped_column(ForeignKey("patients.id"), index=True, nullable=False)
+    section: Mapped[str] = mapped_column(String(80), default="labs", nullable=False)
+    file_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    content_type: Mapped[str] = mapped_column(String(100), nullable=False)
+    object_key: Mapped[str] = mapped_column(String(500), nullable=False)
+    sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    size_bytes: Mapped[int] = mapped_column(Integer, nullable=False)
+    width: Mapped[int | None] = mapped_column(Integer)
+    height: Mapped[int | None] = mapped_column(Integer)
+    extraction_status: Mapped[str] = mapped_column(String(50), default="not_requested", nullable=False)
+
+    case: Mapped[ClinicalCase] = relationship(back_populates="attachments")
+    extractions: Mapped[list["DocumentExtraction"]] = relationship(back_populates="attachment", cascade="all, delete-orphan")
+
+
+class DocumentExtraction(Base, TimestampMixin):
+    __tablename__ = "document_extractions"
+    __table_args__ = (Index("ix_document_extractions_attachment", "attachment_id", "created_at"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    organization_id: Mapped[str] = mapped_column(ForeignKey("organizations.id"), index=True, nullable=False)
+    case_id: Mapped[str] = mapped_column(ForeignKey("clinical_cases.id"), index=True, nullable=False)
+    attachment_id: Mapped[str] = mapped_column(ForeignKey("case_attachments.id"), index=True, nullable=False)
+    model: Mapped[str] = mapped_column(String(100), nullable=False)
+    status: Mapped[str] = mapped_column(String(50), default="requires_review", nullable=False)
+    raw_text: Mapped[str | None] = mapped_column(Text)
+    result_json: Mapped[dict] = mapped_column(JsonType, default=dict, nullable=False)
+    notes: Mapped[list[str]] = mapped_column(JsonType, default=list, nullable=False)
+
+    attachment: Mapped[CaseAttachment] = relationship(back_populates="extractions")
+
+
+class ProposedClinicalFact(Base, TimestampMixin):
+    __tablename__ = "proposed_clinical_facts"
+    __table_args__ = (
+        Index("ix_proposed_facts_case_status", "case_id", "status"),
+        Index("ix_proposed_facts_patient", "patient_id", "fact_type"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    organization_id: Mapped[str] = mapped_column(ForeignKey("organizations.id"), index=True, nullable=False)
+    case_id: Mapped[str] = mapped_column(ForeignKey("clinical_cases.id"), index=True, nullable=False)
+    patient_id: Mapped[str] = mapped_column(ForeignKey("patients.id"), index=True, nullable=False)
+    attachment_id: Mapped[str | None] = mapped_column(ForeignKey("case_attachments.id"), index=True)
+    extraction_id: Mapped[str | None] = mapped_column(ForeignKey("document_extractions.id"), index=True)
+    fact_type: Mapped[str] = mapped_column(String(80), nullable=False)
+    fact_json: Mapped[dict] = mapped_column(JsonType, nullable=False)
+    source_text: Mapped[str | None] = mapped_column(Text)
+    confidence: Mapped[int] = mapped_column(Integer, default=50, nullable=False)
+    status: Mapped[str] = mapped_column(String(30), default="pending_review", nullable=False)
+    reviewed_by: Mapped[str | None] = mapped_column(ForeignKey("users.id"))
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    review_note: Mapped[str | None] = mapped_column(Text)
+
+    case: Mapped[ClinicalCase] = relationship(back_populates="proposed_facts")
 
 
 class Medication(Base):

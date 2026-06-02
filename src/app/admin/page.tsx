@@ -1,8 +1,8 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 import AppShell from '@/components/layout/AppShell'
-import { mockCases, mockPatients } from '@/lib/mock-data'
+import { clinicalApi } from '@/lib/clinical-api'
 
 type AdminUser = {
   id: string
@@ -35,90 +35,81 @@ type Hospital = {
   patients: number
 }
 
-const initialHospitals: Hospital[] = [
-  { id: 'org1', name: 'Улаанбаатар Эмнэлэг №1', plan: 'mvp', status: 'active', adminName: 'Байгууллагын админ', adminEmail: 'admin@clinic.mn', doctors: 1, patients: 5 },
-  { id: 'org2', name: 'Дархан Клиник', plan: 'mvp', status: 'disabled', adminName: 'Демо админ', adminEmail: 'admin@darkhan.mn', doctors: 0, patients: 0 },
-]
-
-const initialUsers: AdminUser[] = [
-  { id: 'u1', name: 'Д. Батболд', email: 'batbold@clinic.mn', role: 'doctor', status: 'active', lastSeen: '2026-06-01 18:22' },
-  { id: 'u2', name: 'Чанарын хянагч', email: 'auditor@clinic.mn', role: 'auditor', status: 'active', lastSeen: '2026-06-01 16:10' },
-  { id: 'u3', name: 'Байгууллагын админ', email: 'admin@clinic.mn', role: 'admin', status: 'active', lastSeen: '2026-06-01 19:01' },
-  { id: 'u4', name: 'Эмийн санч', email: 'pharmacist@clinic.mn', role: 'pharmacist', status: 'disabled', lastSeen: '2026-05-29 11:35' },
-]
-
-const initialUploads: UploadReview[] = [
-  { id: 'px1', patientName: 'Б. Энхжаргал', patientId: 'p1', labName: 'ALT', collectedAt: '2026-06-01', extractionStatus: 'processed', ocrLanguages: 'eng+mon', hasImage: true },
-  { id: 'px2', patientName: 'Д. Батсүх', patientId: 'p2', labName: 'Troponin', collectedAt: '2026-05-31', extractionStatus: 'requires_review', ocrLanguages: 'eng+mon', hasImage: true },
-  { id: 'px3', patientName: 'Н. Оюунчимэг', patientId: 'p3', labName: 'CBC', collectedAt: '2026-05-30', extractionStatus: 'failed', ocrLanguages: 'eng+mon', hasImage: true },
-]
-
 const tabs = ['overview', 'hospitals', 'users', 'uploads', 'security'] as const
 type Tab = typeof tabs[number]
 
 export default function AdminPage() {
   const [activeTab, setActiveTab] = useState<Tab>('overview')
-  const [users, setUsers] = useState(initialUsers)
-  const [uploads, setUploads] = useState(initialUploads)
-  const [hospitals, setHospitals] = useState(initialHospitals)
+  const [users, setUsers] = useState<AdminUser[]>([])
+  const [uploads, setUploads] = useState<UploadReview[]>([])
+  const [hospitals, setHospitals] = useState<Hospital[]>([])
+  const [stats, setStats] = useState({ users: 0, hospitals: 0, activeUsers: 0, patients: 0, cases: 0, uploads: 0, review: 0, failed: 0 })
   const [draft, setDraft] = useState({ name: '', email: '', role: 'doctor' as AdminUser['role'] })
   const [hospitalDraft, setHospitalDraft] = useState({ name: '', adminName: '', adminEmail: '', plan: 'mvp' })
+  const [error, setError] = useState('')
 
-  const stats = useMemo(() => ({
-    users: users.length,
-    hospitals: hospitals.length,
-    activeUsers: users.filter((user) => user.status === 'active').length,
-    patients: mockPatients.length,
-    cases: mockCases.length,
-    uploads: uploads.length,
-    review: uploads.filter((upload) => upload.extractionStatus === 'requires_review').length,
-    failed: uploads.filter((upload) => upload.extractionStatus === 'failed').length,
-  }), [hospitals.length, uploads, users])
+  const refresh = () => {
+    clinicalApi.admin()
+      .then((payload) => {
+        setHospitals(payload.hospitals)
+        setUsers(payload.users)
+        setUploads(payload.uploads)
+        setStats(payload.stats)
+      })
+      .catch((caught) => setError(caught instanceof Error ? caught.message : 'Admin API алдаа гарлаа'))
+  }
 
-  const createHospital = () => {
+  useEffect(() => {
+    refresh()
+  }, [])
+
+  const createHospital = async () => {
     if (!hospitalDraft.name.trim() || !hospitalDraft.adminEmail.trim() || !hospitalDraft.adminName.trim()) return
-    setHospitals((current) => [
-      {
-        id: `org-${Date.now()}`,
-        name: hospitalDraft.name,
-        adminName: hospitalDraft.adminName,
-        adminEmail: hospitalDraft.adminEmail,
-        plan: hospitalDraft.plan,
-        status: 'active',
-        doctors: 0,
-        patients: 0,
-      },
-      ...current,
-    ])
-    setHospitalDraft({ name: '', adminName: '', adminEmail: '', plan: 'mvp' })
+    try {
+      await clinicalApi.createHospital(hospitalDraft)
+      setHospitalDraft({ name: '', adminName: '', adminEmail: '', plan: 'mvp' })
+      refresh()
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Hospital API алдаа гарлаа')
+    }
   }
 
-  const toggleHospital = (id: string) => {
-    setHospitals((current) => current.map((hospital) => hospital.id === id ? { ...hospital, status: hospital.status === 'active' ? 'disabled' : 'active' } : hospital))
+  const toggleHospital = async (id: string) => {
+    try {
+      await clinicalApi.toggleHospital(id)
+      refresh()
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Hospital API алдаа гарлаа')
+    }
   }
 
-  const addUser = () => {
+  const addUser = async () => {
     if (!draft.name.trim() || !draft.email.trim()) return
-    setUsers((current) => [
-      {
-        id: `user-${Date.now()}`,
-        name: draft.name,
-        email: draft.email,
-        role: draft.role,
-        status: 'active',
-        lastSeen: 'Шинэ хэрэглэгч',
-      },
-      ...current,
-    ])
-    setDraft({ name: '', email: '', role: 'doctor' })
+    try {
+      await clinicalApi.createUser(draft)
+      setDraft({ name: '', email: '', role: 'doctor' })
+      refresh()
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'User API алдаа гарлаа')
+    }
   }
 
-  const toggleUser = (id: string) => {
-    setUsers((current) => current.map((user) => user.id === id ? { ...user, status: user.status === 'active' ? 'disabled' : 'active' } : user))
+  const toggleUser = async (id: string) => {
+    try {
+      await clinicalApi.toggleUser(id)
+      refresh()
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'User API алдаа гарлаа')
+    }
   }
 
-  const markReviewed = (id: string) => {
-    setUploads((current) => current.map((upload) => upload.id === id ? { ...upload, extractionStatus: 'processed' } : upload))
+  const markReviewed = async (id: string) => {
+    try {
+      await clinicalApi.markUploadReviewed(id)
+      refresh()
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Upload API алдаа гарлаа')
+    }
   }
 
   return (
@@ -129,10 +120,8 @@ export default function AdminPage() {
             <h1 className="text-2xl font-bold text-slate-900">Админ удирдлага</h1>
             <p className="text-slate-500 text-sm mt-1">Байгууллагын хэрэглэгч, patient portal, OCR upload, audit/security хяналт</p>
           </div>
-          <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-2 text-sm text-emerald-800">
-            admin@clinic.mn / password
-          </div>
         </div>
+        {error && <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>}
 
         <div className="flex gap-2 mb-6">
           {tabs.map((tab) => (

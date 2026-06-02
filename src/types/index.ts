@@ -38,6 +38,15 @@ export interface LabResult {
   referenceRangeHigh: number
   abnormalFlag: boolean
   collectedAt: string
+  dateReviewRequired?: boolean
+}
+
+export interface PatientLabResult extends LabResult {
+  patientId: string
+  caseId?: string
+  source: 'manual' | 'image_ocr'
+  sourceAttachmentId?: string
+  createdAt: string
 }
 
 export interface Medication {
@@ -49,6 +58,18 @@ export interface Medication {
   startDate: string
   ingredients: string[]
   status: 'active' | 'stopped'
+}
+
+export type CaseAttachmentSection = 'basic' | 'symptoms' | 'vitals' | 'labs' | 'medications' | 'allergies'
+
+export interface CaseAttachment {
+  id: string
+  section: CaseAttachmentSection
+  fileName: string
+  contentType: string
+  sizeBytes: number
+  dataUrl: string
+  createdAt: string
 }
 
 export interface DiagnosisSuggestion {
@@ -103,5 +124,6 @@ export interface ClinicalCase {
   symptoms: Symptom[]
   labResults: LabResult[]
   medications: Medication[]
+  attachments?: CaseAttachment[]
   aiResponse?: AIResponse
 }

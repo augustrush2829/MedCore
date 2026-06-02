@@ -1,7 +1,6 @@
 'use client'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { currentUser } from '@/lib/mock-data'
 
 const navItems = [
   { href: '/dashboard', label: 'Хяналтын самбар', icon: '⊞' },
@@ -11,8 +10,18 @@ const navItems = [
   { href: '/audit', label: 'Audit Log', icon: '🔍' },
 ]
 
+const currentUser = {
+  name: 'Эмч',
+  specialty: 'Clinical user',
+}
+
 export default function Sidebar() {
   const pathname = usePathname()
+  const logout = async () => {
+    await fetch('/api/auth/logout', { method: 'POST' })
+    window.location.href = '/'
+  }
+
   return (
     <aside className="w-60 min-h-screen bg-slate-900 flex flex-col shrink-0">
       {/* Logo */}
@@ -58,12 +67,12 @@ export default function Sidebar() {
             <div className="text-slate-400 text-xs truncate">{currentUser.specialty}</div>
           </div>
         </div>
-        <Link
-          href="/"
+        <button
+          onClick={logout}
           className="mt-2 flex items-center gap-3 px-3 py-2 text-slate-400 hover:text-white text-xs rounded-lg hover:bg-slate-800 transition-colors"
         >
           <span>→</span> Гарах
-        </Link>
+        </button>
       </div>
     </aside>
   )
