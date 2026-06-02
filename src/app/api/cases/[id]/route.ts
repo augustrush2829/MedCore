@@ -1,11 +1,19 @@
 import { NextResponse } from 'next/server'
-import { deleteCase, getCase, updateCase } from '@/lib/clinical-store'
+import { backendJson, proxyBackend } from '@/lib/backend-api-proxy'
+import { normalizeCase, toBackendCaseUpdate } from '@/lib/backend-normalize'
 
-export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
+export async function GET(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
-  const clinicalCase = getCase(id)
-  if (!clinicalCase) return NextResponse.json({ error: 'Тохиолдол олдсонгүй' }, { status: 404 })
-  return NextResponse.json(clinicalCase)
+  const { response, body } = await backendJson<unknown>(req, `/cases/${id}`)
+  if (!response.ok) return NextResponse.json(body, { status: response.status })
+  const clinicalCase = normalizeCase(body as never)
+  if (clinicalCase.patientName) return NextResponse.json(clinicalCase)
+
+  const patientResult = await backendJson<{ name: string }>(req, `/patients/${clinicalCase.patientId}`)
+  return NextResponse.json({
+    ...clinicalCase,
+    patientName: patientResult.response.ok ? patientResult.body.name : '',
+  })
 }
 
 export async function PUT(req: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -16,15 +24,23 @@ export async function PUT(req: Request, { params }: { params: Promise<{ id: stri
   } catch {
     return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 })
   }
-
-  const updated = updateCase(id, body)
-  if (!updated) return NextResponse.json({ error: 'Тохиолдол олдсонгүй' }, { status: 404 })
-  return NextResponse.json(updated)
+  const backendReq = new Request(req.url, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(toBackendCaseUpdate(body)),
+  })
+  const { response, body: updated } = await backendJson<unknown>(backendReq, `/cases/${id}`)
+  if (!response.ok) return NextResponse.json(updated, { status: response.status })
+  const clinicalCase = normalizeCase(updated as never)
+  if (clinicalCase.patientName) return NextResponse.json(clinicalCase)
+  const patientResult = await backendJson<{ name: string }>(req, `/patients/${clinicalCase.patientId}`)
+  return NextResponse.json({
+    ...clinicalCase,
+    patientName: patientResult.response.ok ? patientResult.body.name : '',
+  })
 }
 
-export async function DELETE(_req: Request, { params }: { params: Promise<{ id: string }> }) {
+export async function DELETE(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
-  const deleted = deleteCase(id)
-  if (!deleted) return NextResponse.json({ error: 'Тохиолдол олдсонгүй' }, { status: 404 })
-  return NextResponse.json({ deleted: true, id })
+  return proxyBackend(req, `/cases/${id}`)
 }

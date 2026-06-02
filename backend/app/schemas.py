@@ -264,6 +264,19 @@ class ClinicalCaseCreate(BaseModel):
     notes: str | None = None
 
 
+class ClinicalCaseUpdate(BaseModel):
+    chief_complaint: str | None = Field(default=None, min_length=3)
+    notes: str | None = None
+    status: CaseStatus | None = None
+    has_red_flag: bool | None = None
+
+
+class PatientLabBatchCreate(BaseModel):
+    case_id: str | None = None
+    labs: list[LabResultCreate] = Field(min_length=1)
+    chief_complaint: str = "Patient-level lab entry"
+
+
 class ClinicalCaseRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -492,6 +505,11 @@ class PatientExplanationRead(PatientExplanationCreate):
 class AdminPortalExplanationRead(PatientExplanationRead):
     patient_name: str
     patient_medical_record_no: str
+
+
+class AdminPortalExplanationUpdate(BaseModel):
+    extraction_status: Literal["not_requested", "processed", "requires_review", "failed"] | None = None
+    safety_status: str | None = Field(default=None, max_length=50)
 
 
 class DoctorDecisionCreate(BaseModel):

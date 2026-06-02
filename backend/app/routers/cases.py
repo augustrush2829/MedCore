@@ -1,7 +1,7 @@
 from datetime import date
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.orm import selectinload
 
 from app.db.models import (
@@ -34,6 +34,7 @@ from app.schemas import (
     ClinicalCaseCreate,
     DocumentExtractionRead,
     ClinicalCaseRead,
+    ClinicalCaseUpdate,
     DoctorDecisionCreate,
     DoctorDecisionRead,
     FeedbackCreate,
@@ -258,6 +259,59 @@ def get_case(
     return case
 
 
+@router.put("/{case_id}", response_model=ClinicalCaseRead)
+def update_case(
+    case_id: str,
+    payload: ClinicalCaseUpdate,
+    db: DbSession,
+    user: User = Depends(require_permission("case:update")),
+) -> ClinicalCase:
+    case = load_case(db, case_id, user.organization_id)
+    before = {
+        "chief_complaint": case.chief_complaint,
+        "notes": case.notes,
+        "status": case.status,
+        "has_red_flag": case.has_red_flag,
+    }
+    data = payload.model_dump(exclude_unset=True)
+    if "chief_complaint" in data:
+        case.chief_complaint = data["chief_complaint"]
+    if "notes" in data:
+        case.notes = data["notes"]
+    if "status" in data:
+        case.status = data["status"]
+    if "has_red_flag" in data:
+        case.has_red_flag = data["has_red_flag"]
+    case.updated_at = utc_now()
+    write_audit(db, user=user, action="case.update", entity_type="case", entity_id=case.id, before=before, after=data)
+    db.commit()
+    return load_case(db, case.id, user.organization_id)
+
+
+@router.delete("/{case_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_case(
+    case_id: str,
+    db: DbSession,
+    user: User = Depends(require_permission("case:update")),
+) -> None:
+    case = load_case(db, case_id, user.organization_id)
+    ai_responses = db.scalars(
+        select(AIResponse).where(AIResponse.organization_id == user.organization_id, AIResponse.case_id == case.id)
+    ).all()
+    ai_response_ids = [response.id for response in ai_responses]
+    request_ids = [response.request_id for response in ai_responses]
+    if ai_response_ids:
+        db.execute(delete(DoctorFeedbackEvent).where(DoctorFeedbackEvent.ai_response_id.in_(ai_response_ids)))
+        db.execute(delete(DoctorDecision).where(DoctorDecision.ai_response_id.in_(ai_response_ids)))
+        db.execute(delete(AIResponse).where(AIResponse.id.in_(ai_response_ids)))
+    if request_ids:
+        db.execute(delete(AIRequest).where(AIRequest.id.in_(request_ids)))
+    write_audit(db, user=user, action="case.delete", entity_type="case", entity_id=case.id, before={"patient_id": case.patient_id, "status": case.status})
+    db.delete(case)
+    db.commit()
+    return None
+
+
 @router.post("/{case_id}/symptoms", response_model=ClinicalCaseRead, status_code=status.HTTP_201_CREATED)
 def add_symptom(
     case_id: str,
@@ -383,6 +437,39 @@ def extract_case_attachment(
     db.commit()
     db.refresh(extraction)
     return extraction
+
+
+@router.post("/{case_id}/extract-labs")
+def extract_case_lab_attachments(
+    case_id: str,
+    db: DbSession,
+    user: User = Depends(require_permission("case:update")),
+) -> dict:
+    case = load_case(db, case_id, user.organization_id)
+    lab_attachments = [attachment for attachment in case.attachments if attachment.section == "labs"]
+    if not lab_attachments:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No lab attachments found")
+    extractions = [
+        extract_attachment_to_proposed_facts(db, user=user, case=case, attachment=attachment)
+        for attachment in lab_attachments
+    ]
+    write_audit(
+        db,
+        user=user,
+        action="case.lab_attachments.extract",
+        entity_type="case",
+        entity_id=case.id,
+        after={"attachment_count": len(lab_attachments), "extraction_count": len(extractions)},
+    )
+    db.commit()
+    refreshed_case = load_case(db, case.id, user.organization_id)
+    return {
+        "added": 0,
+        "extracted": len(extractions),
+        "patientLabsAdded": 0,
+        "case": ClinicalCaseRead.model_validate(refreshed_case).model_dump(mode="json"),
+        "extractions": [extraction.id for extraction in extractions],
+    }
 
 
 @router.get("/{case_id}/proposed-facts", response_model=list[ProposedClinicalFactRead])

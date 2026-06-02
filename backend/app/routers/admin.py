@@ -13,6 +13,7 @@ from app.routers.patient_portal import to_explanation_read
 from app.schemas import (
     AdminOverview,
     AdminPortalExplanationRead,
+    AdminPortalExplanationUpdate,
     AdminUserCreate,
     AdminUserUpdate,
     OrganizationCreate,
@@ -275,6 +276,35 @@ def get_portal_explanation_image(
         media_type=explanation.attachment_content_type or "application/octet-stream",
         headers={"Content-Disposition": f'inline; filename="{explanation.attachment_name or "lab-image"}"'},
     )
+
+
+@router.patch("/portal-explanations/{explanation_id}", response_model=AdminPortalExplanationRead)
+def update_portal_explanation(
+    explanation_id: str,
+    payload: AdminPortalExplanationUpdate,
+    db: DbSession,
+    user: User = Depends(require_permission("admin:portal_uploads")),
+) -> AdminPortalExplanationRead:
+    explanation = db.scalar(
+        select(PatientPortalExplanation)
+        .options(selectinload(PatientPortalExplanation.patient))
+        .where(
+            PatientPortalExplanation.id == explanation_id,
+            PatientPortalExplanation.organization_id == user.organization_id,
+        )
+    )
+    if not explanation:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Portal explanation not found")
+    before = {"extraction_status": explanation.extraction_status, "safety_status": explanation.safety_status}
+    data = payload.model_dump(exclude_unset=True)
+    if "extraction_status" in data:
+        explanation.extraction_status = data["extraction_status"]
+    if "safety_status" in data:
+        explanation.safety_status = data["safety_status"]
+    write_audit(db, user=user, action="admin.portal_explanation.update", entity_type="patient_portal_explanation", entity_id=explanation.id, before=before, after=data)
+    db.commit()
+    db.refresh(explanation)
+    return to_admin_portal_explanation(explanation)
 
 
 def count_model(db: DbSession, model, *criteria) -> int:

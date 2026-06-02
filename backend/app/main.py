@@ -5,7 +5,7 @@ from sqlalchemy import inspect, text
 from app.core.config import get_settings
 from app.db import models
 from app.db.session import Base, engine
-from app.routers import admin, audit, auth, cases, health, patient_portal, patients
+from app.routers import admin, audit, auth, cases, dashboard, health, patient_portal, patients
 
 
 settings = get_settings()
@@ -65,6 +65,7 @@ def ensure_mvp_schema() -> None:
 
 app.include_router(health.router)
 app.include_router(auth.router)
+app.include_router(dashboard.router)
 app.include_router(patients.router)
 app.include_router(cases.router)
 app.include_router(audit.router)

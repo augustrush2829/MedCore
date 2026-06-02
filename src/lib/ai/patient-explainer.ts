@@ -150,14 +150,14 @@ ${input.patient_question ? `Өвчтөний асуулт: ${input.patient_quest
 
     const observations: LabObservation[] = Array.isArray(v.observations)
       ? v.observations.map((o) => ({
-          test_name: o.test_name ?? '',
-          value: o.value ?? null,
-          unit: o.unit ?? null,
-          reference_range: o.reference_range ?? null,
-          abnormal_flag: o.abnormal_flag ?? null,
-          source: 'gemini-vision',
-          confidence: 80,
-        }))
+        test_name: o.test_name ?? '',
+        value: o.value ?? null,
+        unit: o.unit ?? null,
+        reference_range: o.reference_range ?? null,
+        abnormal_flag: o.abnormal_flag ?? null,
+        source: 'gemini-vision-pro',
+        confidence: 80,
+      }))
       : []
 
     const c = v.content ?? ({} as GeminiContent)
@@ -178,9 +178,9 @@ ${input.patient_question ? `Өвчтөний асуулт: ${input.patient_quest
         notes: observations.length
           ? ['Зургийг Gemini Vision уншиж structured дата гаргав.']
           : [
-              `Баримтын төрөл: ${v.report_type || 'тодорхойгүй'}. Тоон лаб утга биш тул`,
-              'findings-ийг доорх тайлбараас уншина уу. Эцсийн дүгнэлтийг эмч гаргана.',
-            ],
+            `Баримтын төрөл: ${v.report_type || 'тодорхойгүй'}. Тоон лаб утга биш тул`,
+            'findings-ийг доорх тайлбараас уншина уу. Эцсийн дүгнэлтийг эмч гаргана.',
+          ],
         ocr_text: v.ocr_text ?? null,
       },
       source: 'gemini-vision',

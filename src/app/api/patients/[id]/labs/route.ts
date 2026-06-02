@@ -1,16 +1,15 @@
 import { NextResponse } from 'next/server'
-import { addPatientLabs, getPatient, listPatientLabs } from '@/lib/clinical-store'
+import { backendJson } from '@/lib/backend-api-proxy'
+import { toBackendLab } from '@/lib/backend-normalize'
 
-export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
+export async function GET(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
-  if (!getPatient(id)) return NextResponse.json({ error: 'Өвчтөн олдсонгүй' }, { status: 404 })
-  return NextResponse.json(listPatientLabs(id))
+  const result = await backendJson<unknown[]>(req, `/patients/${id}/labs`)
+  return NextResponse.json(result.body, { status: result.response.status })
 }
 
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
-  if (!getPatient(id)) return NextResponse.json({ error: 'Өвчтөн олдсонгүй' }, { status: 404 })
-
   let body
   try {
     body = await req.json()
@@ -18,11 +17,14 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 })
   }
 
-  const labs = Array.isArray(body.labs) ? body.labs : []
-  const created = addPatientLabs(id, labs, {
-    caseId: body.caseId,
-    source: body.source ?? 'manual',
-    sourceAttachmentId: body.sourceAttachmentId,
+  const backendReq = new Request(req.url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      case_id: body.caseId,
+      labs: (Array.isArray(body.labs) ? body.labs : []).map(toBackendLab),
+    }),
   })
-  return NextResponse.json({ added: created.length, labs: created }, { status: 201 })
+  const result = await backendJson<unknown>(backendReq, `/patients/${id}/labs`)
+  return NextResponse.json(result.body, { status: result.response.status })
 }

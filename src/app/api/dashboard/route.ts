@@ -1,6 +1,5 @@
-import { NextResponse } from 'next/server'
-import { dashboardSummary } from '@/lib/clinical-store'
+import { proxyBackend } from '@/lib/backend-api-proxy'
 
-export async function GET() {
-  return NextResponse.json(dashboardSummary())
+export async function GET(req: Request) {
+  return proxyBackend(req, '/dashboard')
 }

@@ -1,9 +1,8 @@
 import { NextResponse } from 'next/server'
-import { analyzeCase } from '@/lib/clinical-store'
+import { backendJson } from '@/lib/backend-api-proxy'
 
-export async function POST(_req: Request, { params }: { params: Promise<{ id: string }> }) {
+export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
-  const clinicalCase = analyzeCase(id)
-  if (!clinicalCase) return NextResponse.json({ error: 'Тохиолдол олдсонгүй' }, { status: 404 })
-  return NextResponse.json(clinicalCase)
+  const { response, body } = await backendJson<unknown>(req, `/cases/${id}/ai/differential-diagnosis`)
+  return NextResponse.json(body, { status: response.status })
 }

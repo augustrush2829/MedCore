@@ -1,13 +1,15 @@
+import base64
 import re
 import subprocess
 import tempfile
 
 from app.core.config import get_settings
 from app.schemas import ImageExtractionResult, PatientExplanationContent, PatientExplanationCreate
+from app.services.gemini import gemini_configured, generate_json
 from app.services.image_storage import StoredImage, extension_for_content_type, read_patient_image
 
 
-EXTRACTION_MODEL = "medcore-image-extraction-mvp-v1"
+EXTRACTION_MODEL = "medcore-image-extraction-gemini-v1"
 
 
 def build_patient_explanation(payload: PatientExplanationCreate) -> PatientExplanationContent:
@@ -48,18 +50,43 @@ def process_lab_image(payload: PatientExplanationCreate, stored_image: StoredIma
             notes=["Зураг ирээгүй тул image AI extraction ажиллаагүй."],
         )
 
-    ocr_text, ocr_notes = run_tesseract_ocr(stored_image)
-    observations = extract_observations_from_ocr(ocr_text)
+    ocr_engine = "tesseract"
+    ocr_languages = get_settings().tesseract_languages
+    extraction_notes: list[str] = []
+
+    if gemini_configured():
+        observations, ocr_text, extraction_notes = run_gemini_lab_extraction(stored_image)
+        ocr_engine = "gemini"
+        ocr_languages = None
+        if not observations:
+            fallback_text, fallback_notes = run_tesseract_ocr(stored_image)
+            observations = extract_observations_from_ocr(fallback_text)
+            ocr_text = ocr_text or fallback_text
+            extraction_notes.extend(["Gemini structured extraction хоосон байсан тул Tesseract fallback ажиллуулсан.", *fallback_notes])
+            ocr_engine = "gemini+tesseract"
+            ocr_languages = get_settings().tesseract_languages
+    else:
+        ocr_text, extraction_notes = run_tesseract_ocr(stored_image)
+        observations = extract_observations_from_ocr(ocr_text)
+
     fallback_observation = build_observation_from_payload(payload)
     if not observations and fallback_observation is not None:
         observations = [fallback_observation]
     notes = [
         "Зураг file/object storage-д хадгалагдаж, database-д object key/hash/metadata хадгалагдсан.",
-        "Tesseract OCR eng+mon хэлээр ажиллаж, raw text болон structured lab data-г extraction JSON-д хадгалсан.",
-        *ocr_notes,
+        (
+            "Gemini vision structured OCR эхэлж ажиллаж, raw text болон lab мөрүүдийг extraction JSON-д хадгалсан."
+            if gemini_configured()
+            else "GEMINI_API_KEY тохируулагдаагүй тул Tesseract OCR fallback ажилласан."
+        ),
+        *extraction_notes,
     ]
+    low_confidence = any(int(observation.get("confidence") or 0) < 70 for observation in observations)
     if not observations:
         notes.append("Зургаас lab мөрийг автоматаар баталгаатай уншаагүй тул хүний review шаардлагатай.")
+        status = "requires_review"
+    elif low_confidence:
+        notes.append("Зарим lab мөрийн confidence 70%-аас бага тул хүний review шаардлагатай.")
         status = "requires_review"
     else:
         notes.append("OCR/form extraction result-ийг structured observation болгон normalize хийж хадгалсан.")
@@ -73,8 +100,8 @@ def process_lab_image(payload: PatientExplanationCreate, stored_image: StoredIma
         image_size_bytes=stored_image.size_bytes,
         image_width=stored_image.width,
         image_height=stored_image.height,
-        ocr_engine="tesseract",
-        ocr_languages=get_settings().tesseract_languages,
+        ocr_engine=ocr_engine,
+        ocr_languages=ocr_languages,
         ocr_text=ocr_text or None,
         observations=observations,
         notes=notes,
@@ -100,6 +127,153 @@ def build_observation_from_payload(payload: PatientExplanationCreate):
         "source": "patient_form_fallback",
         "confidence": 55 if payload.attachment_data_url else 45,
     }
+
+
+def run_gemini_lab_extraction(stored_image: StoredImage) -> tuple[list[dict], str, list[str]]:
+    image_bytes = read_patient_image(stored_image.object_key)
+    prompt = """
+Extract laboratory result table rows from this image.
+
+Return JSON only with this exact shape:
+{
+  "ocr_text": "compact plain text transcription",
+  "observations": [
+    {
+      "test_name": "ALT",
+      "value": "48",
+      "unit": "U/L",
+      "reference_range": "7 - 40",
+      "abnormal_flag": true,
+      "source": "gemini_vision",
+      "confidence": 95
+    }
+  ],
+  "notes": []
+}
+
+Rules:
+- Extract table test rows only. Do not extract patient identifiers or headings as observations.
+- Preserve decimal points exactly. Use medical/table context before deciding between 11.8 and 118, 84.2 and 842, 4.2 and 42, 0.8 and 08.
+- Normalize common units to: U/L, mg/dL, g/dL, mmol/L, %, fL, pg, x10^9/L, x10^12/L, mL/min/1.73m2.
+- Preserve comparison signs in reference ranges, for example <200, <100, >40.
+- abnormal_flag must be true for High/Low rows, false for Normal rows, null only if unclear.
+- confidence must be an integer 0-100. Lower it when the image is blurry or the row is ambiguous.
+"""
+    try:
+        result = generate_json(
+            prompt,
+            system_instruction=(
+                "You are a careful medical-lab OCR extraction engine for a healthcare app. "
+                "The image can be fictional test data. Return strict JSON, no prose."
+            ),
+            image={
+                "mime_type": stored_image.content_type,
+                "base64": base64.b64encode(image_bytes).decode("ascii"),
+            },
+            timeout_seconds=90,
+        )
+    except Exception as exc:
+        return [], "", [f"Gemini OCR ажилласангүй: {exc}"]
+
+    raw_observations = result.get("observations")
+    observations = normalize_gemini_observations(raw_observations if isinstance(raw_observations, list) else [])
+    ocr_text = normalize_ocr_text(str(result.get("ocr_text") or ""))
+    notes = result.get("notes") if isinstance(result.get("notes"), list) else []
+    return observations, ocr_text, [f"Gemini structured rows: {len(observations)}", *[str(note) for note in notes[:5]]]
+
+
+def normalize_gemini_observations(raw_observations: list) -> list[dict]:
+    observations: list[dict] = []
+    seen: set[tuple[str, str | None, str | None]] = set()
+    for raw in raw_observations:
+        if not isinstance(raw, dict):
+            continue
+        test_name = clean_string(raw.get("test_name"))
+        if not test_name:
+            continue
+        value = clean_string(raw.get("value"))
+        unit = normalize_unit(clean_string(raw.get("unit")))
+        reference_range = normalize_reference_range(clean_string(raw.get("reference_range")))
+        key = (test_name.lower(), value, reference_range)
+        if key in seen:
+            continue
+        seen.add(key)
+        confidence = coerce_confidence(raw.get("confidence"))
+        observations.append(
+            {
+                "test_name": test_name,
+                "value": value,
+                "unit": unit,
+                "reference_range": reference_range,
+                "abnormal_flag": coerce_abnormal(raw.get("abnormal_flag")),
+                "source": "gemini_vision",
+                "confidence": confidence,
+            }
+        )
+    return observations
+
+
+def clean_string(value) -> str | None:
+    if value is None:
+        return None
+    cleaned = str(value).strip()
+    return cleaned or None
+
+
+def normalize_unit(value: str | None) -> str | None:
+    if not value:
+        return None
+    compact = value.replace(" ", "")
+    aliases = {
+        "ил": "U/L",
+        "u/l": "U/L",
+        "ul": "U/L",
+        "mg/dl": "mg/dL",
+        "g/dl": "g/dL",
+        "mmol/l": "mmol/L",
+        "fl": "fL",
+        "x10*9/l": "x10^9/L",
+        "x10^9/l": "x10^9/L",
+        "x10*12/l": "x10^12/L",
+        "x10^12/l": "x10^12/L",
+        "ml/min/1.73m2": "mL/min/1.73m2",
+    }
+    return aliases.get(compact.lower(), value)
+
+
+def normalize_reference_range(value: str | None) -> str | None:
+    if not value:
+        return None
+    return (
+        value.replace("–", "-")
+        .replace("—", "-")
+        .replace("«", "<")
+        .replace("≤", "<=")
+        .replace("≥", ">=")
+        .replace(",", ".")
+        .strip()
+    )
+
+
+def coerce_confidence(value) -> int:
+    try:
+        confidence = int(round(float(value)))
+    except (TypeError, ValueError):
+        confidence = 70
+    return max(0, min(100, confidence))
+
+
+def coerce_abnormal(value) -> bool | None:
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return None
+    lowered = str(value).strip().lower()
+    if lowered in {"true", "yes", "high", "low", "abnormal", "1"}:
+        return True
+    if lowered in {"false", "no", "normal", "0"}:
+        return False
+    return None
 
 
 def run_tesseract_ocr(stored_image: StoredImage) -> tuple[str, list[str]]:

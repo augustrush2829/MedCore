@@ -1,6 +1,6 @@
 services:
   postgres:
-    image: postgres:16-alpine
+    image: pgvector/pgvector:pg16
     container_name: medcore-postgres
     environment:
       POSTGRES_DB: medcore
@@ -26,4 +26,3 @@ services:
 
 volumes:
   medcore_postgres_data:
-
