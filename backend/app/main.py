@@ -28,8 +28,16 @@ app.add_middleware(
 @app.on_event("startup")
 def create_tables_for_mvp() -> None:
     # Alembic should own production migrations. Auto-create keeps the MVP runnable.
+    ensure_postgres_extensions()
     Base.metadata.create_all(bind=engine)
     ensure_mvp_schema()
+
+
+def ensure_postgres_extensions() -> None:
+    if engine.dialect.name != "postgresql":
+        return
+    with engine.begin() as connection:
+        connection.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
 
 
 def ensure_mvp_schema() -> None:

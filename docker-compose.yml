@@ -11,10 +11,18 @@ services:
     volumes:
       - medcore_postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U medcore -d medcore"]
+      test: [ "CMD-SHELL", "pg_isready -U medcore -d medcore" ]
       interval: 10s
       timeout: 5s
       retries: 5
+
+  adminer:
+    image: adminer
+    container_name: medcore-adminer
+    ports:
+      - "8080:8080"
+    depends_on:
+      - postgres
 
 volumes:
   medcore_postgres_data:

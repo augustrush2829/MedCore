@@ -1,7 +1,6 @@
 'use client'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { currentUser } from '@/lib/mock-data'
 
 const navItems = [
   { href: '/dashboard', label: 'Хяналтын самбар', icon: '⊞' },
@@ -10,6 +9,11 @@ const navItems = [
   { href: '/admin', label: 'Админ', icon: '⚙' },
   { href: '/audit', label: 'Audit Log', icon: '🔍' },
 ]
+
+const currentUser = {
+  name: 'Эмч',
+  specialty: 'Clinical user',
+}
 
 export default function Sidebar() {
   const pathname = usePathname()

@@ -1,7 +1,10 @@
 from collections import Counter
+import json
 
 from app.db.models import ClinicalCase
 from app.schemas import AIContent, CausalityAssessment, DiagnosisSuggestion, MedicationWarning, RecommendedTest, SourceCitation
+from app.services.gemini import gemini_configured, generate_json
+from app.services.knowledge import retrieve_context
 
 
 LIVER_LABS = {"alt", "ast", "alp", "ggt", "bilirubin", "билирубин"}
@@ -11,6 +14,150 @@ NSAID_INGREDIENTS = {"ibuprofen", "naproxen", "diclofenac", "ketorolac", "асп
 ANTICOAGULANTS = {"warfarin", "rivaroxaban", "apixaban", "dabigatran", "варфарин"}
 ACE_ARB_INGREDIENTS = {"lisinopril", "enalapril", "losartan", "valsartan", "лизиноприл", "эналаприл"}
 POTASSIUM_RAISING_INGREDIENTS = {"spironolactone", "eplerenone", "potassium", "калийн", "спиронолактон"}
+RAG_PROMPT_VERSION = "medcore-rag-gemini-v1"
+
+
+def build_rag_ai_content(db, case: ClinicalCase, *, request_type: str) -> AIContent:
+    deterministic = build_ai_content(case)
+    query = build_case_query(case, request_type)
+    chunks = retrieve_context(db, query)
+    if not gemini_configured():
+        if chunks:
+            deterministic.citations = citations_from_chunks(chunks)
+        return deterministic
+
+    context = "\n\n".join(
+        f"[{index + 1}] {chunk.source_title} ({chunk.source_path})\n{chunk.content}"
+        for index, chunk in enumerate(chunks)
+    ) or "No local knowledge chunks retrieved."
+    prompt = f"""Analyze this clinical case using only the structured case data and retrieved knowledge context.
+Return JSON matching the schema exactly. Do not diagnose finally. Require doctor confirmation.
+If evidence is missing, say what is missing. Include citations from retrieved context where relevant.
+
+Request type: {request_type}
+
+Case JSON:
+{json.dumps(case_snapshot(case), ensure_ascii=False, default=str)}
+
+Retrieved knowledge:
+{context}
+
+JSON schema:
+{{
+  "clinical_summary": "...",
+  "differential_diagnosis": [{{"name": "...", "confidence": 0, "supporting_evidence": ["..."], "missing_evidence": ["..."], "icd_code": null}}],
+  "missing_information": ["..."],
+  "recommended_tests": [{{"name": "...", "reason": "...", "priority": "urgent|routine"}}],
+  "medication_warnings": [{{"type": "interaction|duplicate_ingredient|allergy|contraindication|dose_risk", "severity": "low|medium|high|critical", "description": "...", "medications": ["..."]}}],
+  "causality_assessment": {{"type": "disease_related|medication_related|unclear", "confidence": 0, "evidence": "..."}},
+  "red_flags": ["..."],
+  "citations": [{{"title": "...", "source": "...", "version": "local", "url": null}}],
+  "confidence_level": 0,
+  "doctor_confirmation_required": true
+}}"""
+    try:
+        generated = AIContent.model_validate(generate_json(prompt, system_instruction=clinical_system_instruction()))
+    except Exception as exc:
+        deterministic.missing_information.append(f"Gemini/RAG analyze fallback ашиглав: {exc}")
+        if chunks:
+            deterministic.citations = citations_from_chunks(chunks)
+        return deterministic
+    return merge_safety_content(generated, deterministic, chunks)
+
+
+def clinical_system_instruction() -> str:
+    return """You are MedCore clinical decision support AI.
+You are not a doctor and must not provide final diagnosis or treatment orders.
+Use Mongolian for user-facing text.
+Medication allergy, duplicate ingredient, and serious interaction warnings are safety-critical.
+Never invent lab values, medication use, document dates, or patient history."""
+
+
+def build_case_query(case: ClinicalCase, request_type: str) -> str:
+    snapshot = case_snapshot(case)
+    return " ".join(
+        [
+            request_type,
+            snapshot["chief_complaint"],
+            " ".join(symptom["name"] for symptom in snapshot["symptoms"]),
+            " ".join(lab["test_name"] for lab in snapshot["labs"]),
+            " ".join(med["name"] for med in snapshot["medications"]),
+            " ".join(ingredient for med in snapshot["medications"] for ingredient in med["ingredients"]),
+        ]
+    )
+
+
+def case_snapshot(case: ClinicalCase) -> dict:
+    return {
+        "chief_complaint": case.chief_complaint,
+        "symptoms": [
+            {"name": symptom.name, "severity": symptom.severity, "duration": symptom.duration, "note": symptom.note}
+            for symptom in case.symptoms
+        ],
+        "vitals": [
+            {"type": vital.type, "value": vital.value, "unit": vital.unit, "measured_at": vital.measured_at}
+            for vital in getattr(case, "vital_signs", [])
+        ],
+        "labs": [
+            {
+                "test_name": lab.test_name,
+                "value": lab.value,
+                "unit": lab.unit,
+                "reference_low": lab.reference_low,
+                "reference_high": lab.reference_high,
+                "abnormal_flag": lab.abnormal_flag,
+                "collected_at": lab.collected_at,
+            }
+            for lab in case.lab_results
+        ],
+        "medications": [
+            {
+                "name": medication.name,
+                "dose": medication.dose,
+                "route": medication.route,
+                "frequency": medication.frequency,
+                "status": medication.status,
+                "start_date": medication.start_date,
+                "ingredients": [ingredient.ingredient_name for ingredient in medication.ingredients],
+            }
+            for medication in case.medications
+        ],
+        "supplements": [
+            {"name": supplement.name, "ingredients": supplement.ingredients, "dose": supplement.dose, "start_date": supplement.start_date}
+            for supplement in getattr(case, "supplements", [])
+        ],
+        "allergies": [
+            {"substance": allergy.substance, "severity": allergy.severity, "verified_status": allergy.verified_status}
+            for allergy in getattr(getattr(case, "patient", None), "allergies", [])
+        ],
+    }
+
+
+def merge_safety_content(generated: AIContent, deterministic: AIContent, chunks: list) -> AIContent:
+    existing = {(warning.type, warning.description) for warning in generated.medication_warnings}
+    for warning in deterministic.medication_warnings:
+        key = (warning.type, warning.description)
+        if key not in existing:
+            generated.medication_warnings.append(warning)
+    for red_flag in deterministic.red_flags:
+        if red_flag not in generated.red_flags:
+            generated.red_flags.append(red_flag)
+    if chunks:
+        generated.citations = citations_from_chunks(chunks)
+    generated.doctor_confirmation_required = True
+    return generated
+
+
+def citations_from_chunks(chunks: list) -> list[SourceCitation]:
+    citations: list[SourceCitation] = []
+    seen: set[str] = set()
+    for chunk in chunks:
+        key = f"{chunk.source_title}:{chunk.source_path}"
+        if key in seen:
+            continue
+        seen.add(key)
+        citations.append(SourceCitation(title=chunk.source_title, source=chunk.source_path, version="local", url=None))
+    return citations or default_citations()
 
 
 def build_ai_content(case: ClinicalCase) -> AIContent:

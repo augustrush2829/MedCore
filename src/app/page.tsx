@@ -5,8 +5,8 @@ import { useRouter } from 'next/navigation'
 
 export default function LoginPage() {
   const router = useRouter()
-  const [email, setEmail] = useState('batbold@clinic.mn')
-  const [password, setPassword] = useState('password')
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
   const [loading, setLoading] = useState(false)
 
   const handleLogin = (e: React.FormEvent) => {
@@ -68,11 +68,6 @@ export default function LoginPage() {
               ) : 'Нэвтрэх'}
             </button>
           </form>
-
-          <div className="mt-5 p-3 bg-blue-50 border border-blue-100 rounded-lg">
-            <p className="text-blue-700 text-xs font-medium mb-0.5">Demo данс:</p>
-            <p className="text-slate-600 text-xs">batbold@clinic.mn / password</p>
-          </div>
 
           <div className="mt-3 p-3 bg-emerald-50 border border-emerald-100 rounded-lg">
             <p className="text-emerald-700 text-xs font-medium mb-1">Өвчтөнд зориулсан хэсэг</p>

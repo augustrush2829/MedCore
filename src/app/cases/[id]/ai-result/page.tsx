@@ -1,19 +1,36 @@
 'use client'
-import { use, useState } from 'react'
+import { use, useEffect, useState } from 'react'
 import AppShell from '@/components/layout/AppShell'
 import Link from 'next/link'
-import { mockCases } from '@/lib/mock-data'
+import type { ClinicalCase } from '@/types'
+import { clinicalApi } from '@/lib/clinical-api'
 
 const severityColor = { low: 'bg-yellow-50 border-yellow-200 text-yellow-800', medium: 'bg-orange-50 border-orange-200 text-orange-800', high: 'bg-red-50 border-red-200 text-red-800', critical: 'bg-red-100 border-red-400 text-red-900' }
 const causalityLabel = { disease_related: { label: 'Өвчний явцтай холбоотой', color: 'bg-blue-100 text-blue-700' }, medication_related: { label: 'Эмийн нөлөөтэй холбоотой', color: 'bg-amber-100 text-amber-700' }, unclear: { label: 'Тодорхойгүй', color: 'bg-slate-100 text-slate-600' } }
 
 export default function AIResultPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params)
-  const caseData = mockCases.find((c) => c.id === id) ?? mockCases[0]
-  const ai = caseData.aiResponse
+  const [caseData, setCaseData] = useState<ClinicalCase | null>(null)
   const [decision, setDecision] = useState<'accept' | 'edit' | 'reject' | null>(null)
   const [finalNote, setFinalNote] = useState('')
   const [submitted, setSubmitted] = useState(false)
+  const [error, setError] = useState('')
+
+  useEffect(() => {
+    clinicalApi.case(id)
+      .then(setCaseData)
+      .catch((caught) => setError(caught instanceof Error ? caught.message : 'Case API алдаа гарлаа'))
+  }, [id])
+
+  if (error) {
+    return <AppShell><div className="p-8 text-center text-red-600 text-sm">{error}</div></AppShell>
+  }
+
+  if (!caseData) {
+    return <AppShell><div className="p-8 text-center text-slate-500">Case API-аас уншиж байна...</div></AppShell>
+  }
+
+  const ai = caseData.aiResponse
 
   if (!ai) {
     return (
@@ -23,9 +40,15 @@ export default function AIResultPage({ params }: { params: Promise<{ id: string 
     )
   }
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     if (!decision) return
-    setSubmitted(true)
+    setError('')
+    try {
+      await clinicalApi.saveDecision(id, { decision, finalNote })
+      setSubmitted(true)
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Decision API алдаа гарлаа')
+    }
   }
 
   return (
@@ -47,6 +70,8 @@ export default function AIResultPage({ params }: { params: Promise<{ id: string 
             Энэхүү AI шинжилгээ нь эмчийн шийдвэрийг орлохгүй. Эцсийн онош, эмчилгээний шийдвэрийг эмч баталгаажуулах шаардлагатай.
           </p>
         </div>
+
+        <ClinicalInputReview caseData={caseData} />
 
         {/* Red flags */}
         {ai.redFlags.length > 0 && (
@@ -258,6 +283,12 @@ export default function AIResultPage({ params }: { params: Promise<{ id: string 
               />
             </div>
 
+            {decision === 'edit' && (
+              <Link href={`/cases/${id}`} className="mb-4 block rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm font-medium text-blue-700 hover:bg-blue-100">
+                Оруулсан симптом, амин үзүүлэлт, лаборатори, эм, харшил болон зураг засах →
+              </Link>
+            )}
+
             <button
               onClick={handleSubmit}
               disabled={!decision}
@@ -276,5 +307,88 @@ export default function AIResultPage({ params }: { params: Promise<{ id: string 
         )}
       </div>
     </AppShell>
+  )
+}
+
+function ClinicalInputReview({ caseData }: { caseData: ClinicalCase }) {
+  const attachments = caseData.attachments ?? []
+  const labAttachments = attachments.filter((attachment) => attachment.section === 'labs')
+  const labAbnormal = caseData.labResults.filter((lab) => lab.abnormalFlag).length
+
+  return (
+    <section className="bg-white rounded-xl border border-blue-100 shadow-sm p-6 mb-6">
+      <div className="flex items-start justify-between gap-4 mb-4">
+        <div>
+          <h2 className="font-semibold text-slate-900">AI-д ашигласан оруулсан мэдээлэл</h2>
+          <p className="text-sm text-slate-500 mt-1">{caseData.chiefComplaint}</p>
+        </div>
+        <Link href={`/cases/${caseData.id}`} className="shrink-0 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700">
+          Оруулсан мэдээлэл засах
+        </Link>
+      </div>
+
+      <div className="grid grid-cols-5 gap-3 mb-4">
+        <InputMetric label="Симптом" value={caseData.symptoms.length} />
+        <InputMetric
+          label="Лаб"
+          value={caseData.labResults.length + labAttachments.length}
+          detail={labAbnormal ? `${labAbnormal} хэвийн бус` : labAttachments.length ? `${labAttachments.length} зураг` : undefined}
+        />
+        <InputMetric label="Эм" value={caseData.medications.length} />
+        <InputMetric label="Зураг" value={attachments.length} />
+        <InputMetric label="Улаан дохио" value={caseData.hasRedFlag ? 1 : 0} />
+      </div>
+
+      <div className="grid grid-cols-3 gap-4">
+        <InputList
+          title="Симптом"
+          empty="Симптом оруулаагүй"
+          items={caseData.symptoms.slice(0, 3).map((symptom) => `${symptom.name} · ${symptom.duration || 'хугацаа байхгүй'}`)}
+        />
+        <InputList
+          title="Лаборатори"
+          empty="Лаборатори оруулаагүй"
+          items={[
+            ...caseData.labResults.slice(0, 3).map((lab) => `${lab.testName}: ${lab.value} ${lab.unit}${lab.abnormalFlag ? ' · хэвийн бус' : ''}`),
+            ...labAttachments.slice(0, 3).map((attachment) => `Лаб зураг: ${attachment.fileName}`),
+          ]}
+        />
+        <InputList
+          title="Эм & зураг"
+          empty="Эм, зураг оруулаагүй"
+          items={[
+            ...caseData.medications.slice(0, 2).map((medication) => `${medication.name} ${medication.dose}`.trim()),
+            ...attachments.slice(0, 2).map((attachment) => `${attachment.fileName} · ${attachment.section}`),
+          ]}
+        />
+      </div>
+    </section>
+  )
+}
+
+function InputMetric({ label, value, detail }: { label: string; value: number; detail?: string }) {
+  return (
+    <div className="rounded-lg border border-slate-100 bg-slate-50 px-3 py-3">
+      <p className="text-xs text-slate-500">{label}</p>
+      <p className="text-2xl font-bold text-slate-900">{value}</p>
+      {detail && <p className="text-xs text-red-600">{detail}</p>}
+    </div>
+  )
+}
+
+function InputList({ title, items, empty }: { title: string; items: string[]; empty: string }) {
+  return (
+    <div>
+      <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500 mb-2">{title}</h3>
+      {items.length > 0 ? (
+        <ul className="space-y-1.5">
+          {items.map((item, index) => (
+            <li key={`${title}-${index}-${item}`} className="text-sm text-slate-700 rounded-md bg-slate-50 px-3 py-2">{item}</li>
+          ))}
+        </ul>
+      ) : (
+        <p className="text-sm text-slate-400 rounded-md bg-slate-50 px-3 py-2">{empty}</p>
+      )}
+    </div>
   )
 }

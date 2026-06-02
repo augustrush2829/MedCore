@@ -1,15 +1,15 @@
 import type { Patient, ClinicalCase, AIResponse } from '@/types'
 
 export const currentUser = {
-  id: 'u1',
-  name: 'Д. Батболд',
-  email: 'batbold@clinic.mn',
+  id: 'current-user',
+  name: 'Эмч',
+  email: '',
   role: 'doctor' as const,
-  organization: 'Улаанбаатар Эмнэлэг №1',
-  specialty: 'Дотрын эмч',
+  organization: '',
+  specialty: 'Clinical user',
 }
 
-export const mockPatients: Patient[] = [
+export const seedPatients: Patient[] = [
   { id: 'p1', name: 'Б. Энхжаргал', age: 45, gender: 'female', medicalRecordNo: 'MR-2024-001', dateOfBirth: '1979-03-15', phone: '+976 9911-2233', lastVisit: '2026-05-20' },
   { id: 'p2', name: 'Д. Батсүх', age: 62, gender: 'male', medicalRecordNo: 'MR-2024-002', dateOfBirth: '1962-07-08', phone: '+976 9922-4455', lastVisit: '2026-05-28' },
   { id: 'p3', name: 'Н. Оюунчимэг', age: 33, gender: 'female', medicalRecordNo: 'MR-2024-003', dateOfBirth: '1991-11-22', phone: '+976 9933-6677', lastVisit: '2026-05-29' },
@@ -17,7 +17,7 @@ export const mockPatients: Patient[] = [
   { id: 'p5', name: 'С. Сарнай', age: 28, gender: 'female', medicalRecordNo: 'MR-2024-005', dateOfBirth: '1998-06-05', phone: '+976 9955-0011', lastVisit: '2026-04-15' },
 ]
 
-export const mockAIResponse: AIResponse = {
+export const seedAIResponse: AIResponse = {
   id: 'ai1',
   clinicalSummary: '45 настай эмэгтэй өвчтөн 3 хоногийн турш баруун дээд хэвлийн өвдөлт, дотор муухайрах, давалгааных шинж тэмдэгтэй ирсэн. ALT/AST үзүүлэлт хэвийн дээд хязгаараас 2-3 дахин өссөн байна. Өвчтөн Atorvastatin (40мг) 6 сарын турш хэрэглэж байна.',
   differentialDiagnosis: [
@@ -82,7 +82,7 @@ export const mockAIResponse: AIResponse = {
   doctorConfirmationRequired: true,
 }
 
-export const mockCases: ClinicalCase[] = [
+export const seedCases: ClinicalCase[] = [
   {
     id: 'c1',
     patientId: 'p1',
@@ -105,7 +105,7 @@ export const mockCases: ClinicalCase[] = [
       { id: 'm1', name: 'Atorvastatin', dose: '40мг', route: 'амаар', frequency: 'Өдөрт 1 удаа', startDate: '2025-11-15', ingredients: ['Atorvastatin calcium'], status: 'active' },
       { id: 'm2', name: 'Metformin', dose: '500мг', route: 'амаар', frequency: 'Өдөрт 2 удаа', startDate: '2024-01-10', ingredients: ['Metformin hydrochloride'], status: 'active' },
     ],
-    aiResponse: mockAIResponse,
+    aiResponse: seedAIResponse,
   },
   {
     id: 'c2',

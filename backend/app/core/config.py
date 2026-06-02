@@ -12,6 +12,10 @@ class Settings(BaseSettings):
     environment: str = "development"
     patient_upload_dir: str = "storage/patient_uploads"
     tesseract_languages: str = "eng+mon"
+    gemini_api_key: str | None = None
+    gemini_model: str = "gemini-2.5-flash"
+    gemini_embedding_model: str = "gemini-embedding-001"
+    rag_top_k: int = 6
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 

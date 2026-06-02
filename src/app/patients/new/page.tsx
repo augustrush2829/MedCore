@@ -3,16 +3,31 @@ import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import AppShell from '@/components/layout/AppShell'
 import Link from 'next/link'
+import { clinicalApi } from '@/lib/clinical-api'
 
 export default function NewPatientPage() {
   const router = useRouter()
   const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
   const [form, setForm] = useState({ name: '', dob: '', gender: 'female', phone: '', medicalRecordNo: '', comorbidities: '' })
 
-  const handleSave = (e: React.FormEvent) => {
+  const handleSave = async (e: React.FormEvent) => {
     e.preventDefault()
     setSaving(true)
-    setTimeout(() => router.push('/patients'), 1000)
+    setError('')
+    try {
+      await clinicalApi.createPatient({
+        name: form.name,
+        dateOfBirth: form.dob,
+        gender: form.gender,
+        phone: form.phone,
+        medicalRecordNo: form.medicalRecordNo,
+      })
+      router.push('/patients')
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Patient API алдаа гарлаа')
+      setSaving(false)
+    }
   }
 
   return (
@@ -25,6 +40,7 @@ export default function NewPatientPage() {
         </div>
 
         <h1 className="text-2xl font-bold text-slate-900 mb-6">Шинэ өвчтөн бүртгэх</h1>
+        {error && <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>}
 
         <form onSubmit={handleSave} className="bg-white rounded-xl border border-slate-100 shadow-sm p-6 space-y-5">
           <div className="grid grid-cols-2 gap-4">

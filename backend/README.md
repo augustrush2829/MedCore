@@ -29,20 +29,22 @@ Start PostgreSQL from the repo root:
 docker compose up -d postgres
 ```
 
-Seed demo data:
+Seed local demo data only:
 
 ```bash
+export MEDCORE_DEMO_DATA=true
+export DEMO_STAFF_PASSWORD='change-me-local'
+export DEMO_PATIENT_PASSWORD='change-me-local-patient'
 python -m app.seed
 ```
 
-Demo login:
+Local demo login after seeding:
 
 ```json
 {
   "email": "batbold@clinic.mn",
-  "password": "password"
+  "password": "the value of DEMO_STAFF_PASSWORD"
 }
 ```
 
 API docs: `http://localhost:8000/docs`
-

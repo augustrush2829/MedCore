@@ -283,6 +283,7 @@ class ClinicalCaseRead(BaseModel):
     lab_results: list[LabResultRead] = Field(default_factory=list)
     medications: list[MedicationRead] = Field(default_factory=list)
     supplements: list[SupplementRead] = Field(default_factory=list)
+    attachments: list["CaseAttachmentRead"] = Field(default_factory=list)
 
 
 class RecommendedTest(BaseModel):
@@ -342,6 +343,76 @@ class AIResponseRead(BaseModel):
     safety_status: str
     model_version: str
     generated_at: datetime
+
+
+class CaseAttachmentCreate(BaseModel):
+    section: Literal["basic", "symptoms", "vitals", "labs", "medications", "allergies", "knowledge"] = "labs"
+    file_name: str = Field(min_length=1, max_length=255)
+    content_type: str = Field(min_length=3, max_length=100)
+    data_url: str = Field(min_length=20)
+
+    @model_validator(mode="after")
+    def require_supported_data_url(self) -> "CaseAttachmentCreate":
+        if not self.data_url.startswith("data:"):
+            raise ValueError("data_url must be a data URL")
+        if self.content_type not in {"image/png", "image/jpeg", "image/jpg", "image/webp", "application/pdf", "text/plain"}:
+            raise ValueError("Unsupported attachment content_type")
+        return self
+
+
+class CaseAttachmentRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    case_id: str
+    patient_id: str
+    section: str
+    file_name: str
+    content_type: str
+    sha256: str
+    size_bytes: int
+    width: int | None = None
+    height: int | None = None
+    extraction_status: str
+    created_at: datetime
+
+
+class DocumentExtractionRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    case_id: str
+    attachment_id: str
+    model: str
+    status: str
+    raw_text: str | None = None
+    result_json: dict
+    notes: list[str]
+    created_at: datetime
+
+
+class ProposedClinicalFactRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    case_id: str
+    patient_id: str
+    attachment_id: str | None = None
+    extraction_id: str | None = None
+    fact_type: str
+    fact_json: dict
+    source_text: str | None = None
+    confidence: int
+    status: str
+    reviewed_by: str | None = None
+    reviewed_at: datetime | None = None
+    review_note: str | None = None
+    created_at: datetime
+
+
+class ProposedFactReview(BaseModel):
+    note: str | None = None
+    fact_json: dict | None = None
 
 
 class PatientExplanationContent(BaseModel):
@@ -464,3 +535,6 @@ class AuditLogRead(BaseModel):
     entity_id: str
     metadata_json: dict
     created_at: datetime
+
+
+ClinicalCaseRead.model_rebuild()

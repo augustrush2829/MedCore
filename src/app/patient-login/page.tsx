@@ -7,8 +7,8 @@ import { PATIENT_PROFILE_KEY, PATIENT_TOKEN_KEY, patientLogin } from '@/lib/pati
 
 export default function PatientLoginPage() {
   const router = useRouter()
-  const [loginIdentifier, setLoginIdentifier] = useState('MR-2024-001')
-  const [password, setPassword] = useState('patient123')
+  const [loginIdentifier, setLoginIdentifier] = useState('')
+  const [password, setPassword] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
 
@@ -75,11 +75,6 @@ export default function PatientLoginPage() {
             </button>
           </form>
 
-          <div className="mt-5 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3">
-            <p className="text-xs text-amber-800">
-              Demo данс: MR-2024-001 / patient123. Өгөгдөл backend database-д patient_id-аар тусгаарлагдаж хадгалагдана.
-            </p>
-          </div>
         </section>
       </div>
     </main>

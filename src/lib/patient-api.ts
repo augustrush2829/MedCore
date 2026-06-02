@@ -86,26 +86,68 @@ export const PATIENT_PROFILE_KEY = 'medcore.patientPortal.profile'
 // Тусдаа backend ашиглах бол NEXT_PUBLIC_API_BASE_URL-ийг тохируулна.
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? '/api'
 
+async function requestApi<T>(path: string, init?: RequestInit): Promise<T> {
+  let response: Response
+  try {
+    response = await fetch(`${API_BASE_URL}${path}`, init)
+  } catch (caught) {
+    const detail = caught instanceof Error ? ` (${caught.message})` : ''
+    throw new Error(`Backend API холбогдохгүй байна${detail}`)
+  }
+
+  if (!response.ok) {
+    let message = 'Backend API алдаа гарлаа'
+    try {
+      const body = await response.json() as { error?: string; message?: string }
+      message = body.error || body.message || message
+    } catch {
+      // Ignore body parse errors; status and statusText are still useful.
+    }
+    throw new Error(`${message} (HTTP ${response.status}${response.statusText ? ` ${response.statusText}` : ''})`)
+  }
+
+  return response.json() as Promise<T>
+}
+
+async function requestBlob(path: string, init?: RequestInit): Promise<Blob> {
+  let response: Response
+  try {
+    response = await fetch(`${API_BASE_URL}${path}`, init)
+  } catch (caught) {
+    const detail = caught instanceof Error ? ` (${caught.message})` : ''
+    throw new Error(`Backend API холбогдохгүй байна${detail}`)
+  }
+
+  if (!response.ok) {
+    let message = 'Backend API алдаа гарлаа'
+    try {
+      const body = await response.json() as { error?: string; message?: string }
+      message = body.error || body.message || message
+    } catch {
+      // Blob endpoint can return binary on success and JSON/text on error.
+    }
+    throw new Error(`${message} (HTTP ${response.status}${response.statusText ? ` ${response.statusText}` : ''})`)
+  }
+
+  return response.blob()
+}
+
 export async function patientLogin(login_identifier: string, password: string) {
-  const response = await fetch(`${API_BASE_URL}/patient-portal/login`, {
+  return requestApi<{ access_token: string; token_type: string; patient: PatientPortalUser }>('/patient-portal/login', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ login_identifier, password }),
   })
-  if (!response.ok) throw new Error('Өвчтөний нэвтрэх мэдээлэл буруу байна')
-  return response.json() as Promise<{ access_token: string; token_type: string; patient: PatientPortalUser }>
 }
 
 export async function fetchPatientExplanations(token: string) {
-  const response = await fetch(`${API_BASE_URL}/patient-portal/explanations`, {
+  return requestApi<PatientExplanation[]>('/patient-portal/explanations', {
     headers: { Authorization: `Bearer ${token}` },
   })
-  if (!response.ok) throw new Error('Өмнөх тайлбаруудыг татаж чадсангүй')
-  return response.json() as Promise<PatientExplanation[]>
 }
 
 export async function createPatientExplanation(token: string, payload: PatientExplanationPayload) {
-  const response = await fetch(`${API_BASE_URL}/patient-portal/explanations`, {
+  return requestApi<PatientExplanation>('/patient-portal/explanations', {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${token}`,
@@ -113,14 +155,10 @@ export async function createPatientExplanation(token: string, payload: PatientEx
     },
     body: JSON.stringify(payload),
   })
-  if (!response.ok) throw new Error('Тайлбарыг database-д хадгалж чадсангүй')
-  return response.json() as Promise<PatientExplanation>
 }
 
 export async function fetchPatientExplanationImage(token: string, explanationId: string) {
-  const response = await fetch(`${API_BASE_URL}/patient-portal/explanations/${explanationId}/image`, {
+  return requestBlob(`/patient-portal/explanations/${explanationId}/image`, {
     headers: { Authorization: `Bearer ${token}` },
   })
-  if (!response.ok) throw new Error('Зургийг татаж чадсангүй')
-  return response.blob()
 }

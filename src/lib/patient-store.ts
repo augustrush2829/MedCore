@@ -1,8 +1,7 @@
 import 'server-only'
-import { mockPatients } from './mock-data'
+import { listPatients } from './clinical-store'
 
-// Demo-grade in-memory store. Production-д PostgreSQL + JWT ашиглана.
-// (Тайлангийн patient-portal архитектурын MVP хувилбар.)
+// Fallback in-memory store. Production-д FastAPI/PostgreSQL + JWT ашиглана.
 
 export interface LabObservation {
   test_name: string
@@ -49,7 +48,7 @@ export interface StoredExplanation {
 }
 
 const explanations: StoredExplanation[] = []
-const PATIENT_PASSWORD = 'patient123' // demo: бүх өвчтөнд нэг нууц үг
+const PATIENT_PASSWORD = process.env.PATIENT_DEMO_PASSWORD
 
 export interface PatientPortalUser {
   id: string
@@ -59,15 +58,16 @@ export interface PatientPortalUser {
 }
 
 export function authenticate(loginIdentifier: string, password: string): PatientPortalUser | null {
+  if (!PATIENT_PASSWORD || process.env.MEDCORE_DEMO_DATA !== 'true') return null
   if (password !== PATIENT_PASSWORD) return null
-  const p = mockPatients.find(
+  const p = listPatients().find(
     (x) => x.medicalRecordNo.toLowerCase() === loginIdentifier.trim().toLowerCase()
   )
   if (!p) return null
   return { id: p.id, name: p.name, medical_record_no: p.medicalRecordNo, organization_id: 'org-1' }
 }
 
-// Demo token: base64(patient_id). Production-д JWT.
+// Fallback token: base64(patient_id). Production-д backend JWT ашиглана.
 export function makeToken(patientId: string): string {
   return Buffer.from(`patient:${patientId}`).toString('base64')
 }
@@ -83,7 +83,7 @@ export function verifyToken(authHeader: string | null): string | null {
   }
 }
 
-// Lab утгыг хэвийн хязгаартай харьцуулж энгийн тайлбар үүсгэх (rule-based demo).
+// Lab утгыг хэвийн хязгаартай харьцуулж энгийн fallback тайлбар үүсгэх.
 function parseRange(range: string | null): [number, number] | null {
   if (!range) return null
   const m = range.match(/([\d.]+)\s*[-–]\s*([\d.]+)/)

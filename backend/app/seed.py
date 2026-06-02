@@ -1,4 +1,5 @@
 from datetime import date
+import os
 
 from sqlalchemy import select
 
@@ -21,6 +22,14 @@ from app.db.session import Base, SessionLocal, engine
 
 
 def seed() -> None:
+    if os.getenv("MEDCORE_DEMO_DATA") != "true":
+        print("Seed skipped. Set MEDCORE_DEMO_DATA=true only for local demo data.")
+        return
+    staff_password = os.getenv("DEMO_STAFF_PASSWORD")
+    patient_password = os.getenv("DEMO_PATIENT_PASSWORD")
+    if not staff_password or not patient_password:
+        print("Seed skipped. Set DEMO_STAFF_PASSWORD and DEMO_PATIENT_PASSWORD for local demo data.")
+        return
     Base.metadata.create_all(bind=engine)
     db = SessionLocal()
     try:
@@ -38,7 +47,7 @@ def seed() -> None:
                         email="super@medcore.mn",
                         name="MedCore Super Admin",
                         role="super_admin",
-                        password_hash=hash_password("password"),
+                        password_hash=hash_password(staff_password),
                     )
                 )
             if not db.scalar(select(User).where(User.email == "admin@clinic.mn")):
@@ -48,7 +57,7 @@ def seed() -> None:
                         email="admin@clinic.mn",
                         name="Байгууллагын админ",
                         role="admin",
-                        password_hash=hash_password("password"),
+                        password_hash=hash_password(staff_password),
                     )
                 )
             patient = db.scalar(select(Patient).where(Patient.medical_record_no == "MR-2024-001"))
@@ -58,7 +67,7 @@ def seed() -> None:
                         organization_id=patient.organization_id,
                         patient_id=patient.id,
                         login_identifier="MR-2024-001",
-                        password_hash=hash_password("patient123"),
+                        password_hash=hash_password(patient_password),
                     )
                 )
                 db.commit()
@@ -78,28 +87,28 @@ def seed() -> None:
             email="super@medcore.mn",
             name="MedCore Super Admin",
             role="super_admin",
-            password_hash=hash_password("password"),
+            password_hash=hash_password(staff_password),
         )
         doctor = User(
             organization_id=org.id,
             email="batbold@clinic.mn",
             name="Д. Батболд",
             role="doctor",
-            password_hash=hash_password("password"),
+            password_hash=hash_password(staff_password),
         )
         auditor = User(
             organization_id=org.id,
             email="auditor@clinic.mn",
             name="Чанарын хянагч",
             role="auditor",
-            password_hash=hash_password("password"),
+            password_hash=hash_password(staff_password),
         )
         admin = User(
             organization_id=org.id,
             email="admin@clinic.mn",
             name="Байгууллагын админ",
             role="admin",
-            password_hash=hash_password("password"),
+            password_hash=hash_password(staff_password),
         )
         db.add_all([super_admin, doctor, auditor, admin])
         db.flush()
@@ -122,7 +131,7 @@ def seed() -> None:
                 organization_id=org.id,
                 patient_id=patient.id,
                 login_identifier="MR-2024-001",
-                password_hash=hash_password("patient123"),
+                password_hash=hash_password(patient_password),
             )
         )
 
