@@ -470,3 +470,11 @@ class AuditLog(Base):
     user_agent: Mapped[str | None] = mapped_column(String(255))
     metadata_json: Mapped[dict] = mapped_column(JsonType, default=dict, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
+
+
+class RevokedToken(Base):
+    __tablename__ = "revoked_tokens"
+
+    jti: Mapped[str] = mapped_column(String(36), primary_key=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True, nullable=False)
+    revoked_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)

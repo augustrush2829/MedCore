@@ -1,15 +1,16 @@
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from sqlalchemy import select
 
 from app.core.config import get_settings
 from app.core.rate_limit import LoginRateLimiter
-from app.core.security import create_access_token, verify_password
+from app.core.security import create_access_token, decode_access_token, verify_password
 from app.db.models import User
-from app.dependencies import DbSession, require_permission
+from app.dependencies import BearerToken, CurrentUser, DbSession, require_permission
 from app.schemas import LoginRequest, LoginResponse, UserRead
 from app.services.audit import write_audit
+from app.services.token_revocation import revoke_token
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -63,6 +64,16 @@ def login(payload: LoginRequest, db: DbSession, request: Request) -> LoginRespon
     db.commit()
     token = create_access_token(user.id, {"organization_id": user.organization_id, "role": user.role})
     return LoginResponse(access_token=token, user=to_user_read(user))
+
+
+@router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
+def logout(user: CurrentUser, token: BearerToken, db: DbSession) -> Response:
+    payload = decode_access_token(token)
+    if payload and payload.get("jti") and payload.get("exp"):
+        revoke_token(db, jti=payload["jti"], expires_at=datetime.fromtimestamp(payload["exp"], tz=timezone.utc))
+        write_audit(db, user=user, action="auth.logout", entity_type="user", entity_id=user.id)
+        db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.get("/me", response_model=UserRead)
