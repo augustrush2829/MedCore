@@ -27,8 +27,27 @@ from app.main import app, ensure_mvp_schema  # noqa: E402
 from app.routers.auth import login_rate_limiter  # noqa: E402
 
 
+def fake_embed_text(text: str, *, is_query: bool = False) -> list[float]:
+    """Deterministic bag-of-words stand-in for the real sentence-transformers model.
+
+    Keeps tests offline/fast (no multilingual-e5-base download or inference)
+    while still giving overlapping-vocabulary texts positive cosine similarity,
+    which the RAG retrieval tests rely on.
+    """
+    dimensions = 384
+    vector = [0.0] * dimensions
+    for token in text.lower().replace("/", " ").replace("-", " ").split():
+        index = hash(token) % dimensions
+        vector[index] += 1.0
+    magnitude = sum(value * value for value in vector) ** 0.5
+    if magnitude:
+        vector = [value / magnitude for value in vector]
+    return vector
+
+
 @pytest.fixture(autouse=True)
-def reset_database():
+def reset_database(monkeypatch):
+    monkeypatch.setattr("app.services.knowledge.embed_text", fake_embed_text)
     engine.dispose()
     if TEST_ROOT.exists():
         shutil.rmtree(TEST_ROOT)

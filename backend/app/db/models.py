@@ -15,7 +15,8 @@ except ImportError:  # pragma: no cover - optional dependency in sqlite-only dev
 
 
 JsonType = JSON().with_variant(JSONB, "postgresql")
-EmbeddingType = Vector(3072).with_variant(JSON(), "sqlite") if Vector else JsonType
+EMBEDDING_DIMENSIONS = 768  # intfloat/multilingual-e5-base output size
+EmbeddingType = Vector(EMBEDDING_DIMENSIONS).with_variant(JSON(), "sqlite") if Vector else JsonType
 
 
 def new_id() -> str:

@@ -94,3 +94,36 @@ def test_generate_json_raises_clear_error_when_ollama_unreachable(monkeypatch):
 
     with pytest.raises(RuntimeError, match="Ollama сервертэй холбогдож чадсангүй"):
         gemini.generate_json("prompt")
+
+
+class _FakeVector(list):
+    def tolist(self) -> list:
+        return list(self)
+
+
+class _FakeEmbeddingModel:
+    def __init__(self):
+        self.calls: list[tuple[str, bool]] = []
+
+    def encode(self, text: str, normalize_embeddings: bool = True) -> _FakeVector:
+        self.calls.append((text, normalize_embeddings))
+        return _FakeVector([0.1, 0.2, 0.3])
+
+
+def test_embed_text_prefixes_passage_by_default(monkeypatch):
+    fake_model = _FakeEmbeddingModel()
+    monkeypatch.setattr(gemini, "_embedding_model", lambda: fake_model)
+
+    result = gemini.embed_text("hello world")
+
+    assert fake_model.calls[-1] == ("passage: hello world", True)
+    assert result == [0.1, 0.2, 0.3]
+
+
+def test_embed_text_prefixes_query_when_requested(monkeypatch):
+    fake_model = _FakeEmbeddingModel()
+    monkeypatch.setattr(gemini, "_embedding_model", lambda: fake_model)
+
+    gemini.embed_text("hello world", is_query=True)
+
+    assert fake_model.calls[-1] == ("query: hello world", True)

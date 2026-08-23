@@ -19,6 +19,7 @@ class Settings(BaseSettings):
     ollama_base_url: str = "http://localhost:11434"
     ollama_model: str = "qwen2.5:7b-instruct"
     ollama_vision_model: str = "qwen2.5vl:7b"
+    embedding_model_name: str = "intfloat/multilingual-e5-base"
     login_rate_limit_max_attempts: int = 5
     login_rate_limit_window_seconds: int = 900
     login_rate_limit_lockout_seconds: int = 900

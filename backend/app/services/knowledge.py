@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
 from app.db.models import KnowledgeChunk, KnowledgeDocument
-from app.services.gemini import embed_text, lexical_embedding
+from app.services.gemini import embed_text
 
 
 SUPPORTED_SUFFIXES = {".md": "text/markdown", ".txt": "text/plain", ".json": "application/json", ".pdf": "application/pdf"}
@@ -62,7 +62,7 @@ def ingest_knowledge_file(db: Session, path: Path, *, category: str, version: st
                 chunk_index=index,
                 content=chunk,
                 embedding=embed_text(chunk),
-                embedding_model=get_settings().gemini_embedding_model if get_settings().gemini_api_key else "lexical-fallback",
+                embedding_model=get_settings().embedding_model_name,
                 category=category,
                 source_title=document.title,
                 source_path=document.source_path,
@@ -73,7 +73,7 @@ def ingest_knowledge_file(db: Session, path: Path, *, category: str, version: st
 
 
 def retrieve_context(db: Session, query: str, *, top_k: int | None = None) -> list[KnowledgeChunk]:
-    query_vector = embed_text(query) if get_settings().gemini_api_key else lexical_embedding(query)
+    query_vector = embed_text(query, is_query=True)
     chunks = list(db.scalars(select(KnowledgeChunk)).all())
     scored = [(cosine(query_vector, chunk.embedding or []), chunk) for chunk in chunks]
     scored.sort(key=lambda item: item[0], reverse=True)
