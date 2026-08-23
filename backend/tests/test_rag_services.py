@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 import pytest
@@ -9,7 +10,7 @@ from app.routers.cases import apply_proposed_fact
 from app.services.ai import build_rag_ai_content
 from app.services.clinical_extraction import extract_attachment_to_proposed_facts
 from app.services.image_storage import store_patient_file
-from app.services.knowledge import ingest_knowledge_path
+from app.services.knowledge import ingest_knowledge_path, retrieve_context
 
 from conftest import get_patient_id
 
@@ -106,6 +107,32 @@ def test_rag_ai_content_uses_local_llm_result_when_available(tmp_path: Path, db_
     assert content.clinical_summary == "Local LLM summary"
     assert content.doctor_confirmation_required is True
     assert content.citations[0].title == "statin dili"
+
+
+def test_json_record_list_ingests_one_chunk_per_record_with_own_title(tmp_path: Path, db_session):
+    kb = tmp_path / "mn_edoctor_kb"
+    kb.mkdir()
+    (kb / "edoctor_sample.json").write_text(
+        json.dumps(
+            [
+                {"Өвчин": "Аденовируст халдвар", "Тайлбар": "Амьсгалын замын цочмог халдварт өвчин."},
+                {"Өвчин": "Алцхеймерийн өвчин", "Тайлбар": "Тархины эсүүд аажмаар үхэж, ой санамж буурдаг."},
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    result = ingest_knowledge_path(db_session, kb, category="clinical", version="test")
+
+    assert result["documents"] == 1
+    assert result["chunks"] == 2
+
+    chunks = list(db_session.scalars(select(KnowledgeChunk).order_by(KnowledgeChunk.chunk_index)))
+    assert [chunk.source_title for chunk in chunks] == ["Аденовируст халдвар", "Алцхеймерийн өвчин"]
+    assert "цочмог халдварт" in chunks[0].content
+
+    retrieved = retrieve_context(db_session, "Алцхеймерийн өвчин ой санамж", top_k=1)
+    assert retrieved[0].source_title == "Алцхеймерийн өвчин"
 
 
 def create_case_attachment(db_session, case, doctor) -> CaseAttachment:

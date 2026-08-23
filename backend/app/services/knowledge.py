@@ -54,22 +54,24 @@ def ingest_knowledge_file(db: Session, path: Path, *, category: str, version: st
     db.add(document)
     db.flush()
 
-    chunks = chunk_text(text)
-    for index, chunk in enumerate(chunks):
+    records = chunk_json_records(raw, default_title=document.title) if path.suffix.lower() == ".json" else None
+    entries = records if records is not None else [{"title": document.title, "content": chunk} for chunk in chunk_text(text)]
+
+    for index, entry in enumerate(entries):
         db.add(
             KnowledgeChunk(
                 document_id=document.id,
                 chunk_index=index,
-                content=chunk,
-                embedding=embed_text(chunk),
+                content=entry["content"],
+                embedding=embed_text(entry["content"]),
                 embedding_model=get_settings().embedding_model_name,
                 category=category,
-                source_title=document.title,
+                source_title=entry["title"],
                 source_path=document.source_path,
                 metadata_json={"source_hash": source_hash},
             )
         )
-    return {"document_created": True, "chunks": len(chunks), "skipped": False}
+    return {"document_created": True, "chunks": len(entries), "skipped": False}
 
 
 def retrieve_context(db: Session, query: str, *, top_k: int | None = None) -> list[KnowledgeChunk]:
@@ -96,6 +98,35 @@ def extract_text(path: Path, raw: bytes) -> str:
         reader = PdfReader(str(path))
         return "\n".join(page.extract_text() or "" for page in reader.pages)
     return ""
+
+
+JSON_RECORD_TITLE_KEYS = ("Өвчин", "name", "title")
+
+
+def chunk_json_records(raw: bytes, *, default_title: str) -> list[dict] | None:
+    """One retrieval chunk per record for a JSON file holding a list of
+    objects (e.g. the mn_edoctor_kb disease dataset), keyed under each
+    record's own title instead of slicing the whole file by character count -
+    which would otherwise cut chunks across unrelated records.
+
+    Returns None for JSON shapes that aren't a list of objects, so the
+    caller falls back to generic whole-file chunking.
+    """
+    try:
+        data = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return None
+    if not isinstance(data, list) or not data or not all(isinstance(item, dict) for item in data):
+        return None
+
+    entries: list[dict] = []
+    for item in data:
+        title = next((str(item[key]).strip() for key in JSON_RECORD_TITLE_KEYS if item.get(key)), None) or default_title
+        record_text = "\n".join(f"{key}: {value}" for key, value in item.items() if isinstance(value, str) and value.strip())
+        if not record_text.strip():
+            continue
+        entries.extend({"title": title, "content": chunk} for chunk in chunk_text(record_text))
+    return entries or None
 
 
 def chunk_text(text: str, *, max_chars: int = 1600, overlap: int = 200) -> list[str]:
