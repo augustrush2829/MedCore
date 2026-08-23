@@ -17,30 +17,36 @@ def generate_json(
     *,
     system_instruction: str | None = None,
     image: dict | None = None,
-    timeout_seconds: int = 60,
+    timeout_seconds: int = 120,
 ) -> dict:
-    settings = get_settings()
-    if not settings.gemini_api_key:
-        raise RuntimeError("GEMINI_API_KEY тохируулагдаагүй байна")
+    """Run a local Ollama model and parse its response as JSON.
 
-    parts: list[dict] = [{"text": prompt}]
-    if image:
-        parts.append({"inlineData": {"mimeType": image["mime_type"], "data": image["base64"]}})
+    Model selection: the vision model handles requests that include an image
+    (lab-photo OCR); the text model handles everything else (RAG synthesis).
+    """
+    settings = get_settings()
+    model = settings.ollama_vision_model if image else settings.ollama_model
+
     body: dict = {
-        "contents": [{"parts": parts}],
-        "generationConfig": {"temperature": 0.2, "responseMimeType": "application/json"},
+        "model": model,
+        "prompt": prompt,
+        "format": "json",
+        "stream": False,
+        "options": {"temperature": 0.2},
     }
     if system_instruction:
-        body["systemInstruction"] = {"parts": [{"text": system_instruction}]}
+        body["system"] = system_instruction
+    if image:
+        body["images"] = [image["base64"]]
 
     data = _post_json(
-        f"{API_BASE}/models/{settings.gemini_model}:generateContent?key={settings.gemini_api_key}",
+        f"{settings.ollama_base_url}/api/generate",
         body,
         timeout_seconds=timeout_seconds,
     )
-    text = "".join(part.get("text", "") for part in data.get("candidates", [{}])[0].get("content", {}).get("parts", []))
+    text = data.get("response", "")
     if not text:
-        raise RuntimeError("Gemini хоосон хариу буцаалаа")
+        raise RuntimeError("Ollama хоосон хариу буцаалаа")
     return _parse_json_text(text)
 
 
@@ -82,7 +88,9 @@ def _post_json(url: str, body: dict, *, timeout_seconds: int) -> dict:
             return json.loads(response.read().decode("utf-8"))
     except urllib.error.HTTPError as exc:
         detail = exc.read().decode("utf-8", errors="replace")[:300]
-        raise RuntimeError(f"Gemini API алдаа {exc.code}: {detail}") from exc
+        raise RuntimeError(f"Ollama API алдаа {exc.code}: {detail}") from exc
+    except urllib.error.URLError as exc:
+        raise RuntimeError(f"Ollama сервертэй холбогдож чадсангүй ({url}): {exc.reason}") from exc
 
 
 def _parse_json_text(text: str) -> dict:
