@@ -1,8 +1,10 @@
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy import select
 
+from app.core.config import get_settings
+from app.core.rate_limit import LoginRateLimiter
 from app.core.security import create_access_token, verify_password
 from app.db.models import User
 from app.dependencies import DbSession, require_permission
@@ -10,6 +12,17 @@ from app.schemas import LoginRequest, LoginResponse, UserRead
 from app.services.audit import write_audit
 
 router = APIRouter(prefix="/auth", tags=["auth"])
+
+_settings = get_settings()
+login_rate_limiter = LoginRateLimiter(
+    max_attempts=_settings.login_rate_limit_max_attempts,
+    window_seconds=_settings.login_rate_limit_window_seconds,
+    lockout_seconds=_settings.login_rate_limit_lockout_seconds,
+)
+
+
+def _client_ip(request: Request) -> str:
+    return request.client.host if request.client else "unknown"
 
 
 def to_user_read(user: User) -> UserRead:
@@ -24,10 +37,27 @@ def to_user_read(user: User) -> UserRead:
 
 
 @router.post("/login", response_model=LoginResponse)
-def login(payload: LoginRequest, db: DbSession) -> LoginResponse:
+def login(payload: LoginRequest, db: DbSession, request: Request) -> LoginResponse:
+    email_key = f"email:{payload.email.lower()}"
+    ip_key = f"ip:{_client_ip(request)}"
+
+    for key in (email_key, ip_key):
+        retry_after = login_rate_limiter.seconds_until_unlocked(key)
+        if retry_after is not None:
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail="Too many failed login attempts. Try again later.",
+                headers={"Retry-After": str(int(retry_after) + 1)},
+            )
+
     user = db.scalar(select(User).where(User.email == payload.email, User.status == "active"))
     if not user or not verify_password(payload.password, user.password_hash):
+        login_rate_limiter.record_failure(email_key)
+        login_rate_limiter.record_failure(ip_key)
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password")
+
+    login_rate_limiter.record_success(email_key)
+    login_rate_limiter.record_success(ip_key)
     user.last_login_at = datetime.now(timezone.utc)
     write_audit(db, user=user, action="auth.login", entity_type="user", entity_id=user.id)
     db.commit()

@@ -16,6 +16,9 @@ class Settings(BaseSettings):
     gemini_model: str = "gemini-2.5-flash"
     gemini_embedding_model: str = "gemini-embedding-001"
     rag_top_k: int = 6
+    login_rate_limit_max_attempts: int = 5
+    login_rate_limit_window_seconds: int = 900
+    login_rate_limit_lockout_seconds: int = 900
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 

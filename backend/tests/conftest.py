@@ -24,6 +24,7 @@ from app.core.security import hash_password  # noqa: E402
 from app.db.models import Organization, Patient, PatientPortalAccount, User  # noqa: E402
 from app.db.session import Base, SessionLocal, engine  # noqa: E402
 from app.main import app, ensure_mvp_schema  # noqa: E402
+from app.routers.auth import login_rate_limiter  # noqa: E402
 
 
 @pytest.fixture(autouse=True)
@@ -37,6 +38,7 @@ def reset_database():
     Base.metadata.create_all(bind=engine)
     ensure_mvp_schema()
     seed_test_data()
+    login_rate_limiter.reset_all()
     yield
     engine.dispose()
     Base.metadata.drop_all(bind=engine)
