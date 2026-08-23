@@ -3,13 +3,12 @@ from datetime import date
 
 from sqlalchemy.orm import Session
 
-from app.core.config import get_settings
 from app.db.models import CaseAttachment, ClinicalCase, DocumentExtraction, ProposedClinicalFact, User
-from app.services.gemini import gemini_configured, generate_json
+from app.services.gemini import generate_json
 from app.services.image_storage import read_patient_image
 
 
-EXTRACTION_VERSION = "medcore-clinical-extraction-gemini-v1"
+EXTRACTION_VERSION = "medcore-clinical-extraction-local-v1"
 
 
 def extract_attachment_to_proposed_facts(
@@ -19,7 +18,16 @@ def extract_attachment_to_proposed_facts(
     case: ClinicalCase,
     attachment: CaseAttachment,
 ) -> DocumentExtraction:
-    if not gemini_configured():
+    data = read_patient_image(attachment.object_key)
+    image = {"mime_type": attachment.content_type, "base64": base64.b64encode(data).decode("ascii")}
+    try:
+        result = generate_json(
+            extraction_prompt(case, attachment),
+            system_instruction=extraction_system_instruction(),
+            image=image,
+            timeout_seconds=90,
+        )
+    except Exception as exc:
         extraction = DocumentExtraction(
             organization_id=user.organization_id,
             case_id=case.id,
@@ -27,21 +35,13 @@ def extract_attachment_to_proposed_facts(
             model=EXTRACTION_VERSION,
             status="requires_review",
             result_json={"facts": []},
-            notes=["GEMINI_API_KEY тохируулагдаагүй тул автомат extraction хийгдээгүй."],
+            notes=[f"Local LLM extraction ажилласангүй тул автомат extraction хийгдээгүй: {exc}"],
         )
         attachment.extraction_status = "requires_review"
         db.add(extraction)
         db.flush()
         return extraction
 
-    data = read_patient_image(attachment.object_key)
-    image = {"mime_type": attachment.content_type, "base64": base64.b64encode(data).decode("ascii")}
-    result = generate_json(
-        extraction_prompt(case, attachment),
-        system_instruction=extraction_system_instruction(),
-        image=image,
-        timeout_seconds=90,
-    )
     facts = normalize_facts(result.get("facts", []))
     extraction = DocumentExtraction(
         organization_id=user.organization_id,
@@ -51,7 +51,7 @@ def extract_attachment_to_proposed_facts(
         status="requires_review",
         raw_text=result.get("raw_text"),
         result_json={"facts": facts, "document_date": result.get("document_date")},
-        notes=result.get("notes") if isinstance(result.get("notes"), list) else ["Gemini extraction completed; doctor review required."],
+        notes=result.get("notes") if isinstance(result.get("notes"), list) else ["Local LLM extraction completed; doctor review required."],
     )
     db.add(extraction)
     db.flush()

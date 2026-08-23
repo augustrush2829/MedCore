@@ -63,8 +63,7 @@ def test_knowledge_ingest_is_idempotent_and_rag_fallback_uses_citations(tmp_path
     assert content.citations[0].title == "statin dili"
 
 
-def test_attachment_extraction_requires_review_without_gemini_key(db_session):
-    case, doctor = create_db_case(db_session)
+def create_case_attachment(db_session, case, doctor) -> CaseAttachment:
     stored = store_patient_file(organization_id=doctor.organization_id, patient_id=case.patient_id, data_url=PNG_DATA_URL)
     attachment = CaseAttachment(
         organization_id=doctor.organization_id,
@@ -81,12 +80,62 @@ def test_attachment_extraction_requires_review_without_gemini_key(db_session):
     )
     db_session.add(attachment)
     db_session.commit()
+    return attachment
+
+
+def test_attachment_extraction_requires_review_when_local_llm_unavailable(db_session, monkeypatch):
+    case, doctor = create_db_case(db_session)
+    attachment = create_case_attachment(db_session, case, doctor)
+
+    def fake_generate_json(*args, **kwargs):
+        raise RuntimeError("Ollama сервертэй холбогдож чадсангүй")
+
+    monkeypatch.setattr("app.services.clinical_extraction.generate_json", fake_generate_json)
 
     extraction = extract_attachment_to_proposed_facts(db_session, user=doctor, case=case, attachment=attachment)
 
     assert extraction.status == "requires_review"
-    assert "GEMINI_API_KEY" in extraction.notes[0]
+    assert "Ollama" in extraction.notes[0]
     assert attachment.extraction_status == "requires_review"
+
+
+def test_attachment_extraction_creates_proposed_facts_from_local_llm(db_session, monkeypatch):
+    case, doctor = create_db_case(db_session)
+    attachment = create_case_attachment(db_session, case, doctor)
+
+    def fake_generate_json(*args, **kwargs):
+        return {
+            "raw_text": "ALT 88 U/L",
+            "document_date": "2026-06-01",
+            "facts": [
+                {
+                    "type": "lab",
+                    "confidence": 90,
+                    "source_text": "ALT 88",
+                    "data": {
+                        "test_name": "ALT",
+                        "value": 88,
+                        "unit": "U/L",
+                        "reference_low": 7,
+                        "reference_high": 40,
+                        "abnormal_flag": True,
+                        "collected_at": "2026-06-01",
+                    },
+                }
+            ],
+            "notes": [],
+        }
+
+    monkeypatch.setattr("app.services.clinical_extraction.generate_json", fake_generate_json)
+
+    extraction = extract_attachment_to_proposed_facts(db_session, user=doctor, case=case, attachment=attachment)
+    db_session.commit()
+
+    assert extraction.status == "requires_review"
+    assert attachment.extraction_status == "requires_review"
+    proposed = db_session.scalar(select(ProposedClinicalFact).where(ProposedClinicalFact.extraction_id == extraction.id))
+    assert proposed is not None
+    assert proposed.fact_json["test_name"] == "ALT"
 
 
 def test_approving_lab_proposed_fact_requires_date_then_creates_lab(db_session):

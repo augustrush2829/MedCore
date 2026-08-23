@@ -6,10 +6,6 @@ from functools import lru_cache
 from app.core.config import get_settings
 
 
-def gemini_configured() -> bool:
-    return bool(get_settings().gemini_api_key)
-
-
 def generate_json(
     prompt: str,
     *,

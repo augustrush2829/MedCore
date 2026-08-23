@@ -30,7 +30,12 @@ def create_explanation(client, token: str):
     )
 
 
-def test_patient_upload_stores_metadata_without_returning_base64_or_object_key(client, db_session):
+def test_patient_upload_stores_metadata_without_returning_base64_or_object_key(client, db_session, monkeypatch):
+    def fake_generate_json(*args, **kwargs):
+        raise RuntimeError("Ollama сервертэй холбогдож чадсангүй")
+
+    monkeypatch.setattr("app.services.patient_ai.generate_json", fake_generate_json)
+
     token = patient_login(client, "MR-A-001")
 
     response = create_explanation(client, token)
@@ -43,7 +48,7 @@ def test_patient_upload_stores_metadata_without_returning_base64_or_object_key(c
     assert body["attachment_sha256"]
     assert body["attachment_size_bytes"] > 0
     assert body["has_attachment"] is True
-    assert body["extracted_lab_data"]["ocr_engine"] == "tesseract"
+    assert body["extracted_lab_data"]["ocr_engine"] == "local_vision+tesseract"
     assert body["extracted_lab_data"]["ocr_languages"] == "eng+mon"
 
     stored = db_session.get(PatientPortalExplanation, body["id"])

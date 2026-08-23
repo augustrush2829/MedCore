@@ -3,7 +3,7 @@ import json
 
 from app.db.models import ClinicalCase
 from app.schemas import AIContent, CausalityAssessment, DiagnosisSuggestion, MedicationWarning, RecommendedTest, SourceCitation
-from app.services.gemini import gemini_configured, generate_json
+from app.services.gemini import generate_json
 from app.services.knowledge import retrieve_context
 
 
@@ -14,17 +14,13 @@ NSAID_INGREDIENTS = {"ibuprofen", "naproxen", "diclofenac", "ketorolac", "асп
 ANTICOAGULANTS = {"warfarin", "rivaroxaban", "apixaban", "dabigatran", "варфарин"}
 ACE_ARB_INGREDIENTS = {"lisinopril", "enalapril", "losartan", "valsartan", "лизиноприл", "эналаприл"}
 POTASSIUM_RAISING_INGREDIENTS = {"spironolactone", "eplerenone", "potassium", "калийн", "спиронолактон"}
-RAG_PROMPT_VERSION = "medcore-rag-gemini-v1"
+RAG_PROMPT_VERSION = "medcore-rag-local-v1"
 
 
 def build_rag_ai_content(db, case: ClinicalCase, *, request_type: str) -> AIContent:
     deterministic = build_ai_content(case)
     query = build_case_query(case, request_type)
     chunks = retrieve_context(db, query)
-    if not gemini_configured():
-        if chunks:
-            deterministic.citations = citations_from_chunks(chunks)
-        return deterministic
 
     context = "\n\n".join(
         f"[{index + 1}] {chunk.source_title} ({chunk.source_path})\n{chunk.content}"
@@ -58,7 +54,7 @@ JSON schema:
     try:
         generated = AIContent.model_validate(generate_json(prompt, system_instruction=clinical_system_instruction()))
     except Exception as exc:
-        deterministic.missing_information.append(f"Gemini/RAG analyze fallback ашиглав: {exc}")
+        deterministic.missing_information.append(f"Local LLM/RAG analyze fallback ашиглав: {exc}")
         if chunks:
             deterministic.citations = citations_from_chunks(chunks)
         return deterministic

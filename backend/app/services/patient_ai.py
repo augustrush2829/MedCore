@@ -5,11 +5,11 @@ import tempfile
 
 from app.core.config import get_settings
 from app.schemas import ImageExtractionResult, PatientExplanationContent, PatientExplanationCreate
-from app.services.gemini import gemini_configured, generate_json
+from app.services.gemini import generate_json
 from app.services.image_storage import StoredImage, extension_for_content_type, read_patient_image
 
 
-EXTRACTION_MODEL = "medcore-image-extraction-gemini-v1"
+EXTRACTION_MODEL = "medcore-image-extraction-local-v1"
 
 
 def build_patient_explanation(payload: PatientExplanationCreate) -> PatientExplanationContent:
@@ -50,35 +50,23 @@ def process_lab_image(payload: PatientExplanationCreate, stored_image: StoredIma
             notes=["Зураг ирээгүй тул image AI extraction ажиллаагүй."],
         )
 
-    ocr_engine = "tesseract"
-    ocr_languages = get_settings().tesseract_languages
-    extraction_notes: list[str] = []
-
-    if gemini_configured():
-        observations, ocr_text, extraction_notes = run_gemini_lab_extraction(stored_image)
-        ocr_engine = "gemini"
-        ocr_languages = None
-        if not observations:
-            fallback_text, fallback_notes = run_tesseract_ocr(stored_image)
-            observations = extract_observations_from_ocr(fallback_text)
-            ocr_text = ocr_text or fallback_text
-            extraction_notes.extend(["Gemini structured extraction хоосон байсан тул Tesseract fallback ажиллуулсан.", *fallback_notes])
-            ocr_engine = "gemini+tesseract"
-            ocr_languages = get_settings().tesseract_languages
-    else:
-        ocr_text, extraction_notes = run_tesseract_ocr(stored_image)
-        observations = extract_observations_from_ocr(ocr_text)
+    observations, ocr_text, extraction_notes = run_local_vision_lab_extraction(stored_image)
+    ocr_engine = "local_vision"
+    ocr_languages = None
+    if not observations:
+        fallback_text, fallback_notes = run_tesseract_ocr(stored_image)
+        observations = extract_observations_from_ocr(fallback_text)
+        ocr_text = ocr_text or fallback_text
+        extraction_notes.extend(["Local vision model structured extraction хоосон байсан тул Tesseract fallback ажиллуулсан.", *fallback_notes])
+        ocr_engine = "local_vision+tesseract"
+        ocr_languages = get_settings().tesseract_languages
 
     fallback_observation = build_observation_from_payload(payload)
     if not observations and fallback_observation is not None:
         observations = [fallback_observation]
     notes = [
         "Зураг file/object storage-д хадгалагдаж, database-д object key/hash/metadata хадгалагдсан.",
-        (
-            "Gemini vision structured OCR эхэлж ажиллаж, raw text болон lab мөрүүдийг extraction JSON-д хадгалсан."
-            if gemini_configured()
-            else "GEMINI_API_KEY тохируулагдаагүй тул Tesseract OCR fallback ажилласан."
-        ),
+        "Local vision model structured OCR эхэлж ажиллаж, raw text болон lab мөрүүдийг extraction JSON-д хадгалсан.",
         *extraction_notes,
     ]
     low_confidence = any(int(observation.get("confidence") or 0) < 70 for observation in observations)
@@ -129,7 +117,7 @@ def build_observation_from_payload(payload: PatientExplanationCreate):
     }
 
 
-def run_gemini_lab_extraction(stored_image: StoredImage) -> tuple[list[dict], str, list[str]]:
+def run_local_vision_lab_extraction(stored_image: StoredImage) -> tuple[list[dict], str, list[str]]:
     image_bytes = read_patient_image(stored_image.object_key)
     prompt = """
 Extract laboratory result table rows from this image.
@@ -144,7 +132,7 @@ Return JSON only with this exact shape:
       "unit": "U/L",
       "reference_range": "7 - 40",
       "abnormal_flag": true,
-      "source": "gemini_vision",
+      "source": "local_vision",
       "confidence": 95
     }
   ],
@@ -173,16 +161,16 @@ Rules:
             timeout_seconds=90,
         )
     except Exception as exc:
-        return [], "", [f"Gemini OCR ажилласангүй: {exc}"]
+        return [], "", [f"Local vision OCR ажилласангүй: {exc}"]
 
     raw_observations = result.get("observations")
-    observations = normalize_gemini_observations(raw_observations if isinstance(raw_observations, list) else [])
+    observations = normalize_vision_observations(raw_observations if isinstance(raw_observations, list) else [])
     ocr_text = normalize_ocr_text(str(result.get("ocr_text") or ""))
     notes = result.get("notes") if isinstance(result.get("notes"), list) else []
-    return observations, ocr_text, [f"Gemini structured rows: {len(observations)}", *[str(note) for note in notes[:5]]]
+    return observations, ocr_text, [f"Local vision structured rows: {len(observations)}", *[str(note) for note in notes[:5]]]
 
 
-def normalize_gemini_observations(raw_observations: list) -> list[dict]:
+def normalize_vision_observations(raw_observations: list) -> list[dict]:
     observations: list[dict] = []
     seen: set[tuple[str, str | None, str | None]] = set()
     for raw in raw_observations:
@@ -206,7 +194,7 @@ def normalize_gemini_observations(raw_observations: list) -> list[dict]:
                 "unit": unit,
                 "reference_range": reference_range,
                 "abnormal_flag": coerce_abnormal(raw.get("abnormal_flag")),
-                "source": "gemini_vision",
+                "source": "local_vision",
                 "confidence": confidence,
             }
         )
