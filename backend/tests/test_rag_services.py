@@ -40,7 +40,7 @@ def create_db_case(db_session) -> tuple[ClinicalCase, User]:
     return case, doctor
 
 
-def test_knowledge_ingest_is_idempotent_and_rag_fallback_uses_citations(tmp_path: Path, db_session):
+def ingest_statin_dili_chunk(tmp_path: Path, db_session) -> None:
     kb = tmp_path / "medical_kb"
     kb.mkdir()
     (kb / "statin_dili.md").write_text(
@@ -56,9 +56,54 @@ def test_knowledge_ingest_is_idempotent_and_rag_fallback_uses_citations(tmp_path
     assert second["skipped"] == 1
     assert db_session.scalar(select(KnowledgeChunk)) is not None
 
+
+def test_knowledge_ingest_is_idempotent_and_rag_fallback_uses_citations(tmp_path: Path, db_session, monkeypatch):
+    ingest_statin_dili_chunk(tmp_path, db_session)
+
+    def fake_generate_json(*args, **kwargs):
+        raise RuntimeError("Ollama сервертэй холбогдож чадсангүй")
+
+    monkeypatch.setattr("app.services.ai.generate_json", fake_generate_json)
+
     case, _ = create_db_case(db_session)
     content = build_rag_ai_content(db_session, case, request_type="differential_diagnosis")
 
+    assert content.doctor_confirmation_required is True
+    assert content.citations[0].title == "statin dili"
+    assert "Local LLM/RAG analyze fallback" in content.missing_information[-1]
+
+
+def test_rag_ai_content_uses_local_llm_result_when_available(tmp_path: Path, db_session, monkeypatch):
+    ingest_statin_dili_chunk(tmp_path, db_session)
+
+    def fake_generate_json(*args, **kwargs):
+        return {
+            "clinical_summary": "Local LLM summary",
+            "differential_diagnosis": [
+                {
+                    "name": "Drug-induced liver injury",
+                    "confidence": 70,
+                    "supporting_evidence": ["ALT elevated"],
+                    "missing_evidence": ["Ultrasound"],
+                    "icd_code": "K71",
+                }
+            ],
+            "missing_information": ["Baseline liver panel"],
+            "recommended_tests": [{"name": "ALP, GGT", "reason": "Cholestatic pattern", "priority": "routine"}],
+            "medication_warnings": [],
+            "causality_assessment": {"type": "medication_related", "confidence": 65, "evidence": "Statin timeline overlaps"},
+            "red_flags": [],
+            "citations": [],
+            "confidence_level": 60,
+            "doctor_confirmation_required": True,
+        }
+
+    monkeypatch.setattr("app.services.ai.generate_json", fake_generate_json)
+
+    case, _ = create_db_case(db_session)
+    content = build_rag_ai_content(db_session, case, request_type="differential_diagnosis")
+
+    assert content.clinical_summary == "Local LLM summary"
     assert content.doctor_confirmation_required is True
     assert content.citations[0].title == "statin dili"
 
