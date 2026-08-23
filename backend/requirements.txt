@@ -10,3 +10,4 @@ bcrypt==4.0.1
 python-multipart==0.0.20
 pgvector==0.3.6
 pypdf==5.1.0
+sentence-transformers==6.0.0
