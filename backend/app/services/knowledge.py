@@ -76,10 +76,33 @@ def ingest_knowledge_file(db: Session, path: Path, *, category: str, version: st
 
 def retrieve_context(db: Session, query: str, *, top_k: int | None = None) -> list[KnowledgeChunk]:
     query_vector = embed_text(query, is_query=True)
+    limit = top_k or get_settings().rag_top_k
+
+    if db.get_bind().dialect.name == "postgresql":
+        return _retrieve_context_pgvector(db, query_vector, limit)
+    return _retrieve_context_python_scan(db, query_vector, limit)
+
+
+def _retrieve_context_pgvector(db: Session, query_vector: list[float], limit: int) -> list[KnowledgeChunk]:
+    """Nearest-neighbor lookup via the knowledge_chunks HNSW index (see the
+    2af1460cd260 Alembic migration), instead of pulling every row into the
+    app process. Cosine distance is 1 - cosine similarity, so the `< 1.0`
+    filter matches the old Python path's `similarity > 0` cutoff.
+    """
+    distance = KnowledgeChunk.embedding.cosine_distance(query_vector)
+    rows = db.execute(select(KnowledgeChunk, distance.label("distance")).order_by(distance).limit(limit)).all()
+    return [chunk for chunk, distance_value in rows if distance_value is not None and distance_value < 1.0]
+
+
+def _retrieve_context_python_scan(db: Session, query_vector: list[float], limit: int) -> list[KnowledgeChunk]:
+    """Full-table Python cosine scan. Used on sqlite (local dev/tests), which
+    has no pgvector index support - the embedding column there is a plain
+    JSON blob (see EmbeddingType in app/db/models.py). Fine at dev/test data
+    volumes; not what production traffic goes through.
+    """
     chunks = list(db.scalars(select(KnowledgeChunk)).all())
     scored = [(cosine(query_vector, chunk.embedding or []), chunk) for chunk in chunks]
     scored.sort(key=lambda item: item[0], reverse=True)
-    limit = top_k or get_settings().rag_top_k
     return [chunk for score, chunk in scored[:limit] if score > 0]
 
 
