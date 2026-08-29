@@ -1,5 +1,6 @@
 from functools import lru_cache
 
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -22,6 +23,18 @@ class Settings(BaseSettings):
     login_rate_limit_lockout_seconds: int = 900
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+
+    @model_validator(mode="after")
+    def _require_postgres_outside_development(self) -> "Settings":
+        if self.environment == "development":
+            return self
+        if self.database_url.startswith("sqlite"):
+            raise ValueError(
+                f"DATABASE_URL must be set to a Postgres connection string when "
+                f"ENVIRONMENT={self.environment!r} (sqlite is a development-only fallback). "
+                "Set DATABASE_URL to e.g. postgresql+psycopg://user:pass@host:5432/dbname."
+            )
+        return self
 
     @property
     def cors_origin_list(self) -> list[str]:
