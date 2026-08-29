@@ -22,6 +22,18 @@ like this index, that create_all doesn't express well. A database that
 predates this migration needs `alembic stamp head` run once schema drift
 has been reconciled, since there is no earlier baseline revision to
 autogenerate against.
+
+Verified against real Postgres 16.15 + pgvector 0.8.6: the index builds and
+is valid (`SET enable_seqscan = off` forces an Index Scan using this index
+with correct results), but at the knowledge base's current size (570 rows)
+Postgres's planner prefers a Seq Scan by default - the cost model judges
+that cheaper than an HNSW scan at such a small row count, and their actual
+execution times are in fact close (~0.9ms index scan vs ~1.3ms seq scan).
+This is expected pgvector/Postgres behavior, not a broken index: the
+planner will switch to using it automatically once the table is large
+enough to make it worthwhile, with no migration or config change needed.
+See backend/tests/test_knowledge_retrieval_benchmark.py for the full
+before/after numbers.
 """
 from typing import Sequence, Union
 

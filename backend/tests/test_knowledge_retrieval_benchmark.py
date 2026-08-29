@@ -7,16 +7,36 @@ _retrieve_context_pgvector) only exists on Postgres.
 
 Measured on this machine against the full data/mn_edoctor_kb dataset (219 source
 records -> 570 knowledge_chunks rows, the entire current knowledge base):
-  - single retrieve_context() call: ~51 ms
+  - single retrieve_context() call: ~51 ms (fake/mocked embedding, as used here)
   - 50 sequential calls: ~2.5 s total (50.7 ms/call average)
 
-That's the "before" number. It's fast today only because the table is tiny and this
-runs single-instance with no concurrent load. The Postgres/HNSW "after" number needs
-to be captured separately against a real pgvector instance (e.g. via `docker compose
-up postgres`, run ingest_knowledge.py, then time retrieve_context() through a
-postgresql:// DATABASE_URL) - that benchmark isn't runnable in this sandbox, which has
-no Postgres/Docker available. What this test protects going forward is a regression
-that turns the linear scan quadratic or worse as chunk count grows.
+That sqlite number is the "before" path with a mocked embedding function (this test
+suite's autouse fixture replaces embed_text() - see conftest.py - so no real model
+inference happens here). What this test actually protects going forward is a
+regression that turns the linear scan quadratic or worse as chunk count grows.
+
+The real "before vs after" comparison was captured separately against real Postgres
+16.15 + pgvector 0.8.6 (native Windows build; no Docker was available on that
+machine), same 570-chunk dataset, real intfloat/multilingual-e5-base embeddings for
+both sides, isolating pure retrieval-mechanism cost from embedding cost:
+  - BEFORE (old Python full-table cosine scan, run against Postgres data): ~156.5 ms/call
+  - AFTER  (_retrieve_context_pgvector, letting Postgres pick its own plan):  ~2.5 ms/call
+  - ~62x faster
+
+Important caveat found via EXPLAIN ANALYZE: at this table size (570 rows), Postgres's
+query planner does NOT use the ix_knowledge_chunks_embedding_hnsw index - it picks a
+Seq Scan + in-memory sort, because the planner's cost model judges that cheaper than
+an HNSW index scan at such a small row count. Forcing `SET enable_seqscan = off`
+confirms the index itself is valid and does get picked (Index Scan using
+ix_knowledge_chunks_embedding_hnsw) with a comparable execution time (~0.9ms vs
+~1.3ms for the seq scan) - so the index isn't broken, it's just not yet worth using
+at this scale. The ~62x win measured above therefore comes mainly from moving the
+distance computation and sort into Postgres/C instead of pulling all 570 embeddings
+into the Python process, not from the HNSW index specifically. The index is groundwork
+for when the knowledge base is large enough (expect low thousands of rows or more,
+depending on data) that Postgres's planner starts choosing it automatically - no code
+or config change needed when that happens, and this can be re-verified any time with
+`EXPLAIN ANALYZE` on the query in _retrieve_context_pgvector().
 """
 
 import time
