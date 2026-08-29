@@ -1,4 +1,5 @@
 from functools import lru_cache
+from typing import Literal
 
 from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -10,7 +11,7 @@ class Settings(BaseSettings):
     jwt_algorithm: str = "HS256"
     access_token_expire_minutes: int = 60
     cors_origins: str = "http://localhost:3000"
-    environment: str = "development"
+    environment: Literal["development", "production"] = "development"
     patient_upload_dir: str = "storage/patient_uploads"
     tesseract_languages: str = "eng+mon"
     rag_top_k: int = 6
