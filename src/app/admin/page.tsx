@@ -173,11 +173,11 @@ function Overview({ stats }: { stats: { hospitals: number; users: number; active
       <div className="grid grid-cols-4 gap-4">
         <Metric label="Patient uploads" value={stats.uploads} detail={`${stats.review} review, ${stats.failed} failed`} tone={stats.review || stats.failed ? 'warning' : 'default'} />
         <Metric label="OCR хэл" value={2} detail="eng + mon" />
-        <Metric label="Storage" value={1} detail="encrypted object-key mode" />
+        <Metric label="Storage" value={1} detail="private S3 bucket, presigned URLs" />
         <Metric label="Audit" value={1} detail="admin actions logged" />
       </div>
       <div className="grid grid-cols-2 gap-4">
-        <ControlCard title="Patient portal хяналт" items={['Зураг encrypted file storage-д хадгалагдана', 'DB-д object key/hash/metadata хадгална', 'Image endpoint patient/admin scope шалгана', 'Tesseract OCR eng+mon extraction хадгална']} />
+        <ControlCard title="Patient portal хяналт" items={['Зураг private S3 bucket-д хадгалагдана', 'DB-д object key/hash/metadata хадгална', 'Image endpoint scope шалгаад presigned URL руу redirect хийнэ', 'Tesseract OCR eng+mon extraction хадгална']} />
         <ControlCard title="Admin API capability" items={['/admin/overview', '/admin/users create/update/disable', '/admin/portal-explanations list/review', '/admin/portal-explanations/{id}/image scoped access']} />
       </div>
     </div>
@@ -349,9 +349,9 @@ function SecurityPanel() {
   return (
     <div className="grid grid-cols-2 gap-4">
       <ControlCard title="Access control" items={['Admin endpoints require user:manage/admin:* permissions', 'Portal image access checks organization_id + patient_id', 'Admin image access checks organization_id', 'Object key is not returned to patient frontend']} />
-      <ControlCard title="Storage controls" items={['Images encrypted before local file write', 'DB stores hash, size, dimensions, content type', 'Path traversal guard blocks ../ object keys', 'Upload directories are gitignored']} />
+      <ControlCard title="Storage controls" items={['Private S3 bucket, no public-read policy', 'Files served only via short-lived presigned URLs', 'DB stores hash, size, dimensions, content type', 'Upload buckets are never listed to the frontend']} />
       <ControlCard title="Audit controls" items={['Admin user create/update writes audit', 'Admin image view writes audit', 'Patient portal records keep created_at and lab_collected_at', 'OCR raw text is retained for review']} />
-      <ControlCard title="Operational gaps" items={['Add Alembic migrations before production', 'Move local storage to S3/GCS with KMS', 'Add MFA/OTP for patient login', 'Add retention and deletion workflow']} />
+      <ControlCard title="Operational gaps" items={['Add Alembic migrations before production', 'Run the S3 upload migration for remaining local files', 'Add MFA/OTP for patient login', 'Add retention and deletion workflow']} />
     </div>
   )
 }

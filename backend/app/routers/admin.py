@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from fastapi.responses import Response
+from fastapi.responses import RedirectResponse
 from sqlalchemy import func, select
 from sqlalchemy.orm import selectinload
 
@@ -23,7 +23,7 @@ from app.schemas import (
     UserRead,
 )
 from app.services.audit import write_audit
-from app.services.image_storage import patient_image_path, read_patient_image
+from app.services.image_storage import object_exists, presigned_download_url
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -259,23 +259,23 @@ def get_portal_explanation_image(
     explanation_id: str,
     db: DbSession,
     user: User = Depends(require_permission("admin:portal_uploads")),
-) -> Response:
+) -> RedirectResponse:
     explanation = db.get(PatientPortalExplanation, explanation_id)
-    if not explanation or explanation.organization_id != user.organization_id or not explanation.attachment_object_key:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Image not found")
-    try:
-        path = patient_image_path(explanation.attachment_object_key)
-    except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Image not found") from exc
-    if not path.exists():
+    if (
+        not explanation
+        or explanation.organization_id != user.organization_id
+        or not explanation.attachment_object_key
+        or not object_exists(explanation.attachment_object_key)
+    ):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Image not found")
     write_audit(db, user=user, action="admin.portal_image.view", entity_type="patient_portal_explanation", entity_id=explanation.id)
     db.commit()
-    return Response(
-        content=read_patient_image(explanation.attachment_object_key),
-        media_type=explanation.attachment_content_type or "application/octet-stream",
-        headers={"Content-Disposition": f'inline; filename="{explanation.attachment_name or "lab-image"}"'},
+    url = presigned_download_url(
+        explanation.attachment_object_key,
+        filename=explanation.attachment_name or "lab-image",
+        content_type=explanation.attachment_content_type,
     )
+    return RedirectResponse(url, status_code=status.HTTP_307_TEMPORARY_REDIRECT)
 
 
 @router.patch("/portal-explanations/{explanation_id}", response_model=AdminPortalExplanationRead)

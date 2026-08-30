@@ -1,11 +1,11 @@
 import base64
 import hashlib
 from dataclasses import dataclass
-from pathlib import Path
 from uuid import uuid4
 
-from cryptography.fernet import Fernet
+from botocore.exceptions import ClientError
 
+from app.core import s3_client
 from app.core.config import get_settings
 
 
@@ -61,9 +61,12 @@ def store_patient_file_payload(*, organization_id: str, patient_id: str, payload
     width, height = detect_image_dimensions(payload.content_type, payload.data)
     extension = extension_for_content_type(payload.content_type)
     object_key = f"{organization_id}/{patient_id}/{uuid4()}{extension}"
-    path = storage_root() / object_key
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_bytes(encrypt_bytes(payload.data))
+    s3_client.get_s3_client().put_object(
+        Bucket=get_settings().s3_bucket,
+        Key=object_key,
+        Body=payload.data,
+        ContentType=payload.content_type,
+    )
     return StoredFile(
         object_key=object_key,
         content_type=payload.content_type,
@@ -75,41 +78,20 @@ def store_patient_file_payload(*, organization_id: str, patient_id: str, payload
 
 
 def read_patient_image(object_key: str) -> bytes:
-    path = safe_storage_path(object_key)
-    return decrypt_bytes(path.read_bytes())
+    response = s3_client.get_s3_client().get_object(Bucket=get_settings().s3_bucket, Key=object_key)
+    return response["Body"].read()
 
 
-def patient_image_path(object_key: str) -> Path:
-    return safe_storage_path(object_key)
+def object_exists(object_key: str) -> bool:
+    try:
+        s3_client.get_s3_client().head_object(Bucket=get_settings().s3_bucket, Key=object_key)
+        return True
+    except ClientError:
+        return False
 
 
-def storage_root() -> Path:
-    configured = Path(get_settings().patient_upload_dir)
-    if configured.is_absolute():
-        return configured.resolve()
-    backend_root = Path(__file__).resolve().parents[2]
-    return (backend_root / configured).resolve()
-
-
-def encryption_key() -> bytes:
-    digest = hashlib.sha256(get_settings().jwt_secret.encode("utf-8")).digest()
-    return base64.urlsafe_b64encode(digest)
-
-
-def encrypt_bytes(data: bytes) -> bytes:
-    return Fernet(encryption_key()).encrypt(data)
-
-
-def decrypt_bytes(data: bytes) -> bytes:
-    return Fernet(encryption_key()).decrypt(data)
-
-
-def safe_storage_path(object_key: str) -> Path:
-    root = storage_root()
-    path = (root / object_key).resolve()
-    if root not in path.parents and path != root:
-        raise ValueError("Invalid object key")
-    return path
+def presigned_download_url(object_key: str, *, filename: str | None = None, content_type: str | None = None) -> str:
+    return s3_client.generate_presigned_get_url(object_key, filename=filename, content_type=content_type)
 
 
 def parse_image_data_url(data_url: str) -> ImagePayload:

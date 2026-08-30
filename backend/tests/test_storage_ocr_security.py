@@ -1,5 +1,5 @@
 from app.schemas import PatientExplanationCreate
-from app.services.image_storage import patient_image_path, read_patient_image, safe_storage_path, store_patient_image
+from app.services.image_storage import read_patient_image, store_patient_image
 from app.services.patient_ai import parse_lab_line, process_lab_image
 
 
@@ -9,27 +9,15 @@ PNG_DATA_URL = (
 )
 
 
-def test_storage_encrypts_file_and_decrypts_on_read():
+def test_storage_round_trips_through_s3():
     stored = store_patient_image(organization_id="org", patient_id="patient", data_url=PNG_DATA_URL)
-    encrypted = patient_image_path(stored.object_key).read_bytes()
-    decrypted = read_patient_image(stored.object_key)
+    fetched = read_patient_image(stored.object_key)
 
-    assert encrypted != decrypted
-    assert decrypted.startswith(b"\x89PNG")
+    assert fetched.startswith(b"\x89PNG")
+    assert stored.object_key.startswith("org/patient/")
     assert stored.sha256
     assert stored.width == 1
     assert stored.height == 1
-
-
-def test_storage_blocks_path_traversal():
-    try:
-        safe_storage_path("../outside")
-    except ValueError:
-        blocked = True
-    else:
-        blocked = False
-
-    assert blocked is True
 
 
 def test_ocr_parser_handles_latin_and_mongolian_lab_names():

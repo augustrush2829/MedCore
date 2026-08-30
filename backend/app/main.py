@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import inspect, text
 
 from app.core.config import get_settings
+from app.core.s3_client import ensure_bucket_exists
 from app.db import models
 from app.db.session import Base, engine
 from app.routers import admin, audit, auth, cases, dashboard, health, patient_portal, patients
@@ -31,6 +32,7 @@ def create_tables_for_mvp() -> None:
     ensure_postgres_extensions()
     Base.metadata.create_all(bind=engine)
     ensure_mvp_schema()
+    ensure_bucket_exists()
 
 
 def ensure_postgres_extensions() -> None:

@@ -20,11 +20,13 @@ os.environ["JWT_SECRET"] = "test-secret"
 os.environ["PATIENT_UPLOAD_DIR"] = str(TEST_UPLOADS)
 os.environ["TESSERACT_LANGUAGES"] = "eng+mon"
 
+from app.core import s3_client  # noqa: E402
 from app.core.security import hash_password  # noqa: E402
 from app.db.models import Organization, Patient, PatientPortalAccount, User  # noqa: E402
 from app.db.session import Base, SessionLocal, engine  # noqa: E402
 from app.main import app, ensure_mvp_schema  # noqa: E402
 from app.routers.auth import login_rate_limiter  # noqa: E402
+from s3_fake import FakeS3Client  # noqa: E402
 
 
 def fake_embed_text(text: str, *, is_query: bool = False) -> list[float]:
@@ -48,6 +50,8 @@ def fake_embed_text(text: str, *, is_query: bool = False) -> list[float]:
 @pytest.fixture(autouse=True)
 def reset_database(monkeypatch):
     monkeypatch.setattr("app.services.knowledge.embed_text", fake_embed_text)
+    fake_s3 = FakeS3Client()
+    monkeypatch.setattr(s3_client, "get_s3_client", lambda: fake_s3)
     engine.dispose()
     if TEST_ROOT.exists():
         shutil.rmtree(TEST_ROOT)

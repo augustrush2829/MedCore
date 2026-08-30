@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from fastapi.responses import Response
+from fastapi.responses import RedirectResponse
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
@@ -18,7 +18,7 @@ from app.schemas import (
     PatientPortalUserRead,
 )
 from app.services.patient_ai import build_patient_explanation, process_lab_image
-from app.services.image_storage import patient_image_path, read_patient_image, store_patient_image
+from app.services.image_storage import object_exists, presigned_download_url, store_patient_image
 
 router = APIRouter(prefix="/patient-portal", tags=["patient-portal"])
 
@@ -111,26 +111,22 @@ def get_explanation(explanation_id: str, db: DbSession, account: CurrentPatientA
 
 
 @router.get("/explanations/{explanation_id}/image")
-def get_explanation_image(explanation_id: str, db: DbSession, account: CurrentPatientAccount) -> Response:
+def get_explanation_image(explanation_id: str, db: DbSession, account: CurrentPatientAccount) -> RedirectResponse:
     explanation = db.get(PatientPortalExplanation, explanation_id)
     if (
         not explanation
         or explanation.organization_id != account.organization_id
         or explanation.patient_id != account.patient_id
         or not explanation.attachment_object_key
+        or not object_exists(explanation.attachment_object_key)
     ):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Image not found")
-    try:
-        path = patient_image_path(explanation.attachment_object_key)
-    except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Image not found") from exc
-    if not path.exists():
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Image not found")
-    return Response(
-        content=read_patient_image(explanation.attachment_object_key),
-        media_type=explanation.attachment_content_type or "application/octet-stream",
-        headers={"Content-Disposition": f'inline; filename="{explanation.attachment_name or "lab-image"}"'},
+    url = presigned_download_url(
+        explanation.attachment_object_key,
+        filename=explanation.attachment_name or "lab-image",
+        content_type=explanation.attachment_content_type,
     )
+    return RedirectResponse(url, status_code=status.HTTP_307_TEMPORARY_REDIRECT)
 
 
 @router.post("/explanations", response_model=PatientExplanationRead, status_code=status.HTTP_201_CREATED)

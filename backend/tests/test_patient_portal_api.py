@@ -80,18 +80,20 @@ def test_patient_cannot_read_other_patient_explanation_or_image(client):
     assert image_response.status_code == 404
 
 
-def test_patient_can_fetch_own_decrypted_image(client):
+def test_patient_can_fetch_own_image_via_presigned_redirect(client):
     token = patient_login(client, "MR-A-001")
     created = create_explanation(client, token).json()
 
     response = client.get(
         f"/patient-portal/explanations/{created['id']}/image",
         headers={"Authorization": f"Bearer {token}"},
+        follow_redirects=False,
     )
 
-    assert response.status_code == 200
-    assert response.headers["content-type"] == "image/png"
-    assert response.content.startswith(b"\x89PNG")
+    assert response.status_code == 307
+    location = response.headers["location"]
+    assert location.startswith("https://fake-s3.invalid/")
+    assert "method=get_object" in location
 
 
 def test_admin_can_list_portal_uploads_in_own_organization(client):
