@@ -31,6 +31,30 @@ def get_s3_client():
     return boto3.client("s3", **kwargs)
 
 
+def generate_presigned_get_url(
+    object_key: str,
+    *,
+    filename: str | None = None,
+    content_type: str | None = None,
+    expires_in: int | None = None,
+) -> str:
+    """A time-limited signed GET URL for a private-bucket object. This is the
+    only way object content ever reaches the frontend - the bucket itself
+    has no public-read policy, so a bare object URL is never usable.
+    """
+    settings = get_settings()
+    params: dict = {"Bucket": settings.s3_bucket, "Key": object_key}
+    if content_type:
+        params["ResponseContentType"] = content_type
+    if filename:
+        params["ResponseContentDisposition"] = f'inline; filename="{filename}"'
+    return get_s3_client().generate_presigned_url(
+        "get_object",
+        Params=params,
+        ExpiresIn=expires_in if expires_in is not None else settings.s3_presigned_url_expire_seconds,
+    )
+
+
 def ensure_bucket_exists(*, bucket: str | None = None) -> None:
     """Create the bucket if it doesn't exist yet. Never sets a public/read
     bucket policy - S3 and MinIO buckets are private by default, and we rely
