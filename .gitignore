@@ -30,6 +30,8 @@ backend/*.db
 /medcore_dev.db
 /storage/
 /backend/storage/
+/migration_reports/
+/backend/migration_reports/
 
 # debug
 npm-debug.log*
