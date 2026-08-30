@@ -45,9 +45,6 @@ docker compose up -d postgres
 
 Default `.env.example` points to PostgreSQL. Without `.env`, the backend uses local SQLite for quick development.
 
-  organizations:
-  Улаанбаатар Эмнэлэг №1 mvp active
-  MedCore Platform platform active
 
   users:
   batbold@clinic.mn doctor
