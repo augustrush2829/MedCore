@@ -23,6 +23,12 @@ class Settings(BaseSettings):
     login_rate_limit_window_seconds: int = 900
     login_rate_limit_lockout_seconds: int = 900
     redis_url: str | None = None
+    s3_endpoint_url: str | None = None
+    s3_bucket: str = "medcore-patient-uploads"
+    s3_access_key: str | None = None
+    s3_secret_key: str | None = None
+    s3_region: str = "us-east-1"
+    s3_presigned_url_expire_seconds: int = 300
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
