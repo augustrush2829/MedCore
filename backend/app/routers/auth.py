@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from sqlalchemy import select
 
 from app.core.config import get_settings
-from app.core.rate_limit import LoginRateLimiter
+from app.core.rate_limit import build_login_rate_limiter
 from app.core.security import create_access_token, decode_access_token, verify_password
 from app.db.models import User
 from app.dependencies import BearerToken, CurrentUser, DbSession, require_permission
@@ -15,11 +15,7 @@ from app.services.token_revocation import revoke_token
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 _settings = get_settings()
-login_rate_limiter = LoginRateLimiter(
-    max_attempts=_settings.login_rate_limit_max_attempts,
-    window_seconds=_settings.login_rate_limit_window_seconds,
-    lockout_seconds=_settings.login_rate_limit_lockout_seconds,
-)
+login_rate_limiter = build_login_rate_limiter(_settings)
 
 
 def _client_ip(request: Request) -> str:

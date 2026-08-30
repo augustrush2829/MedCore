@@ -22,6 +22,7 @@ class Settings(BaseSettings):
     login_rate_limit_max_attempts: int = 5
     login_rate_limit_window_seconds: int = 900
     login_rate_limit_lockout_seconds: int = 900
+    redis_url: str | None = None
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
